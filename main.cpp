@@ -31,9 +31,9 @@
 
 int main(int argc, char *argv[])
 {
-  printf("TapeWorm: A Memotech wav tapefile cleaner by Lars Muldjord, 2018\n");
+  printf("TapeWorm: A Memotech wav tapefile cleaner and optimizer by Lars Muldjord 2018\n");
   std::string srcName;
-  std::string dstName = "output.wav";
+  std::string dstName = "output.wav"; // Name will always be changed, but set just in case
   if(argc == 2) {
     srcName = argv[1];
     dstName = "cleaned_" + srcName;
@@ -58,28 +58,38 @@ int main(int argc, char *argv[])
     return 1;
   }
 
-  short *buffer;
-  std::vector<short> *data = new std::vector<short>;
+  std::vector<short> data;
 
   // Read
-  while(srcFile.read(buffer, 1) != 0) {
-    data->push_back(*buffer);
+  {
+    short buffer;
+    unsigned long dots = 0;
+    unsigned long dotMod = srcFile.frames() / 10;
+    printf("Reading from '%s'", srcName.c_str()) ;
+    while(srcFile.read(&buffer, 1) != 0) {
+      data.push_back(buffer);
+      if(dots % dotMod == 0) {
+	printf(".");
+	fflush(stdout);
+      }
+      dots++;
+    }
+    printf(" Done!\n");
   }
 
-  std::vector<short> *dataClean = new std::vector<short>;
+  std::vector<short> dataClean;
   // Do stuff
   {
-    unsigned long dots = 0;
-    unsigned long dotMod = data->size() / 10;
+    unsigned long dotMod = data.size() / 10;
     short thres = SHRT_MAX / 10;
     printf("Cleaning and optimizing");
-    for(int a = 0; a < data->size(); ++a) {
-      if(data->at(a) > thres) {
-	dataClean->push_back(SHRT_MAX);
-      } else if(data->at(a) < -thres) {
-	dataClean->push_back(SHRT_MIN);
+    for(int a = 0; a < data.size(); ++a) {
+      if(data.at(a) > thres) {
+	dataClean.push_back(SHRT_MAX);
+      } else if(data.at(a) < -thres) {
+	dataClean.push_back(SHRT_MIN);
       } else {
-	dataClean->push_back(data->at(a));
+	dataClean.push_back(data.at(a));
       }
 	      
       if(a % dotMod == 0) {
@@ -87,31 +97,23 @@ int main(int argc, char *argv[])
 	fflush(stdout);
       }
     }
+    printf(" Done!\n");
   }
   
-  printf(" Done!\n");
-
   // Write
   {
-    unsigned long dots = 0;
-    unsigned long dotMod = dataClean->size() / 10;
+    unsigned long dotMod = dataClean.size() / 10;
     printf("Saving to '%s'", dstName.c_str()) ;
     SndfileHandle dstFile(dstName.c_str(), SFM_WRITE, srcFile.format(), srcFile.channels(), srcFile.samplerate());
-    for(int a = 0; a < dataClean->size(); ++a) {
+    for(int a = 0; a < dataClean.size(); ++a) {
       if(a % dotMod == 0) {
 	printf(".");
 	fflush(stdout);
       }
-      dstFile.write(&dataClean->at(a), 1);
+      dstFile.write(&dataClean.at(a), 1);
     }
-    
     printf(" Done!\n");
   }
 
-  delete data;
-  delete dataClean;
-
   return 0;
 }
-
-
