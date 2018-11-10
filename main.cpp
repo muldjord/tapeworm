@@ -26,6 +26,7 @@
 #include <iostream>
 #include <vector>
 #include <climits>
+#include <math.h>
 
 #include <sndfile.hh>
 
@@ -80,16 +81,78 @@ int main(int argc, char *argv[])
   std::vector<short> dataClean;
   // Do stuff
   {
-    unsigned long dotMod = data.size() / 10;
-    short thres = SHRT_MAX / 10;
     printf("Cleaning and optimizing");
+    // Set bit length limits based on samplerate. This might need reworking
+    /*
+    unsigned short minLen = srcFile.samplerate() / 7350;
+    unsigned short maxLen = srcFile.samplerate() / 1297;
+    unsigned short bitZer = srcFile.samplerate() / 4410;
+    unsigned short bitOne = srcFile.samplerate() / 2205;
+    unsigned short bitSig = srcFile.samplerate() / 1470;
+    unsigned short bitZerOpt = srcFile.samplerate() / 5512;
+    unsigned short bitOneOpt = srcFile.samplerate() / 2756;
+    unsigned short bitSigOpt = srcFile.samplerate() / 1836;
+    */
+    unsigned short minLen = 3;
+    unsigned short maxLen = 17;
+    unsigned short bitZer = 5;
+    unsigned short bitOne = 10;
+    unsigned short bitSig = 15;
+    unsigned short bitZerOpt = 4;
+    unsigned short bitOneOpt = 8;
+    unsigned short bitSigOpt = 12;
+    unsigned long dotMod = data.size() / 10;
+    // Set threshold that needs to be exceeded before doing traceback to bitstart
+    short sampleMax = 0;
     for(int a = 0; a < data.size(); ++a) {
-      if(data.at(a) > thres) {
-	dataClean.push_back(SHRT_MAX);
-      } else if(data.at(a) < -thres) {
-	dataClean.push_back(SHRT_MIN);
+      if(abs(data.at(a)) > sampleMax)
+	sampleMax = abs(data.at(a));
+    }
+    short thres = sampleMax / 4;
+
+    // Figure out the necessary zero correction delta from the first few samples
+    short zeroCorr = 0;
+    for(int a = 0; a < 25; ++a) {
+      zeroCorr += abs(data.at(a));
+    }
+    zeroCorr /= 25;
+    printf("zeroCorr: %d\n", zeroCorr);
+
+    // Set zero threshold used to determine when we are back at 0 after a signal
+    short zeroThres = (sampleMax / 5) + zeroCorr;
+
+    // Sample iteration
+    for(int a = 0; a < data.size(); ++a) {
+      // Seek until threshold is exceeded
+      if(abs(data.at(a) + zeroCorr) > thres) {
+	long int smpSum = 0;
+	// Seek-back to crossing
+	while(a - 1 >= 0 && abs(data.at(a - 1) + zeroCorr) > zeroThres) {
+	  a--;
+	  dataClean.pop_back();
+	}
+	short bitLength = 1;
+	while(a + bitLength < data.size() && abs(data.at(a + bitLength) + zeroCorr) > zeroThres) {
+	  smpSum += data.at(a + bitLength) + zeroCorr;
+	  bitLength++;
+	}
+	if(bitLength <= minLen || bitLength >= maxLen) {
+	  for(int b = 0; b < bitLength; ++b) {
+	    dataClean.push_back(0);
+	  }
+	} else {
+	  printf("Bitlength=%d!!!\n", bitLength);
+	  for(int b = 0; b < round((double)bitLength / (double)bitZer) * bitZerOpt; ++b) {
+	    if(smpSum >= 0) {
+	      dataClean.push_back(SHRT_MAX);
+	    } else {
+	      dataClean.push_back(SHRT_MIN);
+	    }
+	  }
+	}
+	a += bitLength;
       } else {
-	dataClean.push_back(data.at(a));
+	dataClean.push_back(0);
       }
 	      
       if(a % dotMod == 0) {
