@@ -93,7 +93,7 @@ int main(int argc, char *argv[])
     unsigned short bitOneOpt = srcFile.samplerate() / 2756;
     unsigned short bitSigOpt = srcFile.samplerate() / 1836;
     */
-    unsigned short minLen = 3;
+    unsigned short minLen = 2;
     unsigned short maxLen = 17;
     unsigned short bitZer = 5;
     unsigned short bitOne = 10;
@@ -102,38 +102,42 @@ int main(int argc, char *argv[])
     unsigned short bitOneOpt = 8;
     unsigned short bitSigOpt = 12;
     unsigned long dotMod = data.size() / 10;
-    // Set threshold that needs to be exceeded before doing traceback to bitstart
-    short sampleMax = 0;
-    for(int a = 0; a < data.size(); ++a) {
-      if(abs(data.at(a)) > sampleMax)
-	sampleMax = abs(data.at(a));
-    }
-    short thres = sampleMax / 4;
 
     // Figure out the necessary zero correction delta from the first few samples
     short zeroCorr = 0;
     for(int a = 0; a < 25; ++a) {
-      zeroCorr += abs(data.at(a));
+      zeroCorr += data.at(a);
     }
     zeroCorr /= 25;
     printf("zeroCorr: %d\n", zeroCorr);
 
+    // Set threshold that needs to be exceeded before doing traceback to bitstart
+    short sampleMax = 0;
+    for(int a = 0; a < data.size(); ++a) {
+      if(abs(data.at(a) - zeroCorr) > sampleMax)
+	sampleMax = abs(data.at(a) - zeroCorr);
+    }
+    short thres = sampleMax / 20;
+    printf("Threshold: %d\n", thres);
+
     // Set zero threshold used to determine when we are back at 0 after a signal
-    short zeroThres = (sampleMax / 5) + zeroCorr;
+    short zeroThres = zeroCorr;
+
+    for(int a = data.size() / 2; a < data.size() / 2 + 50; ++a) {
+      printf("Sample: %d\n", data.at(a) - zeroCorr);
+    }
 
     // Sample iteration
     for(int a = 0; a < data.size(); ++a) {
       // Seek until threshold is exceeded
-      if(abs(data.at(a) + zeroCorr) > thres) {
-	long int smpSum = 0;
+      if(data.at(a) - zeroCorr > thres) {
 	// Seek-back to crossing
-	while(a - 1 >= 0 && abs(data.at(a - 1) + zeroCorr) > zeroThres) {
+	while(a - 1 >= 0 && data.at(a - 1) - zeroCorr > zeroThres) {
 	  a--;
 	  dataClean.pop_back();
 	}
 	short bitLength = 1;
-	while(a + bitLength < data.size() && abs(data.at(a + bitLength) + zeroCorr) > zeroThres) {
-	  smpSum += data.at(a + bitLength) + zeroCorr;
+	while(a + bitLength < data.size() && data.at(a + bitLength) - zeroCorr > zeroThres) {
 	  bitLength++;
 	}
 	if(bitLength <= minLen || bitLength >= maxLen) {
@@ -141,17 +145,34 @@ int main(int argc, char *argv[])
 	    dataClean.push_back(0);
 	  }
 	} else {
-	  printf("Bitlength=%d!!!\n", bitLength);
+	  //printf("Bitlength=%d!!!\n", bitLength);
 	  for(int b = 0; b < round((double)bitLength / (double)bitZer) * bitZerOpt; ++b) {
-	    if(smpSum >= 0) {
-	      dataClean.push_back(SHRT_MAX);
-	    } else {
-	      dataClean.push_back(SHRT_MIN);
-	    }
+	    dataClean.push_back(SHRT_MAX / 4 * 3);
 	  }
 	}
-	a += bitLength;
-      } else {
+	a += bitLength - 1;
+      } else if(data.at(a) - zeroCorr < -thres) {
+	// Seek-back to crossing
+	while(a - 1 >= 0 && data.at(a - 1) - zeroCorr < -zeroThres) {
+	  a--;
+	  dataClean.pop_back();
+	}
+	short bitLength = 1;
+	while(a + bitLength < data.size() && data.at(a + bitLength) - zeroCorr < -zeroThres) {
+	  bitLength++;
+	}
+	if(bitLength <= minLen || bitLength >= maxLen) {
+	  for(int b = 0; b < bitLength; ++b) {
+	    dataClean.push_back(0);
+	  }
+	} else {
+	  //printf("Bitlength=%d!!!\n", bitLength);
+	  for(int b = 0; b < round((double)bitLength / (double)bitZer) * bitZerOpt; ++b) {
+	    dataClean.push_back(SHRT_MIN / 4 * 3);
+	  }
+	}
+	a += bitLength - 1;
+	} else {
 	dataClean.push_back(0);
       }
 	      
