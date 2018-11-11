@@ -33,6 +33,8 @@
 #include <sndfile.hh>
 
 #define BUFFER 1024
+#define INITDIV 4
+#define ZERODIV 20
 
 int getZero(std::vector<short> &data, int idx, int span)
 {
@@ -141,16 +143,24 @@ int main(int argc, char *argv[])
     std::map<short, long int> segSizeMap;
     unsigned long dotMod = data.size() / 10;
     for(int a = 0; a < data.size(); ++a) {
-      if(data.at(a) > maxVal / 4) {
-	while(a - 1 >= 0 && data.at(a - 1) > maxVal / 20) {
+      // Detect signal drop that indicate bit begin
+      if(data.at(a) < minVal / INITDIV) {
+	printf("a: %d\n", a);
+	// Backtrack to bit beginning
+	while(a - 1 >= 0 && data.at(a - 1) < minVal / ZERODIV) {
 	  a--;
 	}
-	short curLength = 1;
-	while(a + curLength < data.size() && data.at(a + curLength) > maxVal / 20) {
+	int curLength = 1;
+	// Drop phase
+	while(a + curLength < data.size() && data.at(a + curLength) < maxVal / INITDIV) {
+	  curLength++;
+	}
+	// Rise phase
+	while(a + curLength < data.size() && data.at(a + curLength) > maxVal / ZERODIV) {
 	  curLength++;
 	}
 	segSizeMap[curLength] += 1;
-	a += curLength;
+	a += curLength - 1;
       }
       if(a % dotMod == 0) {
 	printf(".");
@@ -170,10 +180,11 @@ int main(int argc, char *argv[])
     // print the vector
     printf(" Done!\n");
     std::vector<short> relevant;
-    for(auto const &pair: segSizes) {
-      //printf("segLength=%d, segCount=%ld\n", pair.first, pair.second);
-      if(pair.second > srcFile.frames() / 137)
-	relevant.push_back(pair.first);
+    for(int a = 0; a < segSizes.size() - 1; ++a) {
+      if(segSizes.at(a).second > srcFile.frames() / 137) {
+	relevant.push_back(segSizes.at(a).first);
+	printf("segLength=%d, segCount=%ld\n", segSizes.at(a).first, segSizes.at(a).second);
+      }
     }
     std::sort(relevant.begin(), relevant.end());
     int segCount = 0;
@@ -191,25 +202,28 @@ int main(int argc, char *argv[])
   // Clean and optimize
   {
     // Set bit length limits based on samplerate. This might need reworking
-    unsigned short bitLengthOpt = srcFile.samplerate() / 5512;
+    unsigned short bitLengthOpt = srcFile.samplerate() / 2450;
     unsigned short minLen = bitLength / 2;
-    unsigned short maxLen = (bitLength * 3) + (bitLength / 2);
+    unsigned short maxLen = (bitLength * 2) + (bitLength / 2);
     unsigned long dotMod = data.size() / 10;
-    printf("  Detected bitlength = %d\n", bitLength);
-    printf("  Optimal bitlength = %d\n", bitLengthOpt);
-    //printf("  minLen=%d\n", minLen);
-    //printf("  maxLen=%d\n", maxLen);
+    printf("  Detected zero bitlength = %d (appr. %d baud)\n", bitLength, srcFile.samplerate() / bitLength);
+    printf("  Optimal zero bitlength = %d\n", bitLengthOpt);
+    printf("  minLen=%d\n", minLen);
+    printf("  maxLen=%d\n", maxLen);
     printf("Cleaning and optimizing");
     // Sample iteration
     for(int a = 0; a < data.size(); ++a) {
-      // Seek until threshold is exceeded
-      if(data.at(a) > maxVal / 4) {
-	while(a - 1 >= 0 && data.at(a - 1) > maxVal / 20) {
+      // Detect signal drop that indicate bit begin
+      if(data.at(a) < minVal / INITDIV) {
+	// Backtrack to bit beginning
+	while(a - 1 >= 0 && data.at(a - 1) < minVal / ZERODIV) {
 	  a--;
-	  dataClean.pop_back();
 	}
-	short curLength = 0;
-	while(a + curLength < data.size() && data.at(a + curLength) > maxVal / 20) {
+	long int curLength = 1;
+	while(a + curLength < data.size() && data.at(a + curLength) < maxVal / INITDIV) {
+	  curLength++;
+	}
+	while(a + curLength < data.size() && data.at(a + curLength) > maxVal / ZERODIV) {
 	  curLength++;
 	}
 	if(curLength <= minLen || curLength >= maxLen) {
@@ -217,29 +231,23 @@ int main(int argc, char *argv[])
 	    dataClean.push_back(0);
 	  }
 	} else {
-	  for(int b = 0; b < round((double)curLength / (double)bitLength) * bitLengthOpt; ++b) {
-	    dataClean.push_back(SHRT_MAX / 4 * 3);
+	  printf("curLength=%ld\n", curLength);
+	  if(abs(curLength - bitLength) < abs(curLength - bitLength * 2)) {
+	    for(int b = 0; b < ceil(bitLengthOpt / 2.0); ++b) {
+	      dataClean.push_back(SHRT_MIN);
+	    }
+	    for(int b = 0; b < floor(bitLengthOpt / 2.0); ++b) {
+	      dataClean.push_back(SHRT_MAX);
+	    }
+	  } else {
+	    for(int b = 0; b < bitLengthOpt; ++b) {
+	      dataClean.push_back(SHRT_MIN);
+	    }
+	    for(int b = 0; b < bitLengthOpt; ++b) {
+	      dataClean.push_back(SHRT_MAX);
+	    }
 	  }
-	}
-	a += curLength - 1;
-      } else if(data.at(a) < minVal / 4) {
-	while(a - 1 >= 0 && data.at(a - 1) < minVal / 20) {
-	  a--;
-	  dataClean.pop_back();
-	}
-	short curLength = 0;
-	while(a + curLength < data.size() && data.at(a + curLength) < minVal / 20) {
-	  curLength++;
-	}
-	if(curLength <= minLen || curLength >= maxLen) {
-	  for(int b = 0; b < curLength; ++b) {
-	    dataClean.push_back(0);
-	  }
-	} else {
-	  //printf("Bitlength=%d!!!\n", curLength);
-	  for(int b = 0; b < round((double)curLength / (double)bitLength) * bitLengthOpt; ++b) {
-	    dataClean.push_back(SHRT_MIN / 4 * 3);
-	  }
+	    
 	}
 	a += curLength - 1;
       } else {
@@ -258,7 +266,9 @@ int main(int argc, char *argv[])
     printf("Saving to '%s'", dstName.c_str()) ;
     SndfileHandle dstFile(dstName.c_str(), SFM_WRITE, SF_FORMAT_WAV | SF_FORMAT_PCM_U8, srcFile.channels(), srcFile.samplerate());
     unsigned long dotMod = dataClean.size() / BUFFER / 10;
-    short buffer[BUFFER];
+    short buffer[BUFFER] = {0};
+    dstFile.write(buffer, BUFFER); // Write a couple of silent buffers. Some players don't play
+    dstFile.write(buffer, BUFFER); // the first part, so a bit of silence is important
     for(int a = 0; a < dataClean.size(); a = a + BUFFER) {
       sf_count_t write = 0;
       for(int b = 0; b < BUFFER; ++b) {
