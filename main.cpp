@@ -32,12 +32,14 @@
 
 #include <sndfile.hh>
 
-int getZero(std::vector<short> &data, int idx, int span, int &segMax, int &segMin)
+int getZero(std::vector<short> &data, int idx, int span)
 {
-  for(int b = 0; b < span; ++b) {
-    if(idx + b >= data.size())
+  int segMax = data.at(idx);
+  int segMin = data.at(idx);
+  for(int a = 0; a < span; ++a) {
+    if(idx + a >= data.size())
       break;
-    int sample = data.at(idx + b);
+    int sample = data.at(idx + a);
     if(sample > segMax)
       segMax = sample;
     if(sample < segMin)
@@ -77,9 +79,7 @@ int main(int argc, char *argv[])
   }
 
   std::vector<short> data;
-  int segLen = srcFile.samplerate() / 689; // 32 for a 22050 kHz file
-  int maxVal = 0;
-  int minVal = 0;
+  int segLen = srcFile.samplerate() / 1102; // 20 for a 22050 kHz file
 
   // Read
   {
@@ -89,10 +89,6 @@ int main(int argc, char *argv[])
     printf("Reading from '%s'", srcName.c_str());
     while(srcFile.read(&buffer, 1) != 0) {
       data.push_back(buffer);
-      if(buffer > maxVal)
-	maxVal = buffer;
-      if(buffer < minVal)
-	minVal = buffer;
       if(dots % dotMod == 0) {
 	printf(".");
 	fflush(stdout);
@@ -102,7 +98,23 @@ int main(int argc, char *argv[])
     printf(" Done!\n");
   }
 
-  std::vector<short> dataClean;
+  // Zero adjust all data
+  for(int a = 0; a < data.size(); ++a) {
+    int zero = getZero(data, a, segLen);
+    data.at(a) = data.at(a) - zero;
+  }
+
+  // Set maximum and minimum sample value
+  int maxVal = 0;
+  int minVal = 0;
+  for(int a = 0; a < data.size(); ++a) {
+    int sample = data.at(a);
+    if(sample > maxVal)
+      maxVal = sample;
+    if(sample < minVal)
+      minVal = sample;
+  }
+
   typedef std::pair<short, short> pair;
   std::vector<pair> segSizes;
   // Analyze
@@ -111,19 +123,14 @@ int main(int argc, char *argv[])
     std::map<short, short> segSizeMap;
     unsigned long dotMod = data.size() / 10;
     for(int a = 0; a < data.size(); ++a) {
-      int segMax = 0;
-      int segMin = 0;
-      int zero = getZero(data, a, segLen, segMax, segMin);
-      int posThres = (segMax - zero) / 4;
-      int negThres = (segMin - zero) / 4;
-      if((int)data.at(a) - zero > posThres) {
-	printf("Found rise at sample: %d\n", a);
-	while(a - 1 >= 0 && (int)data.at(a - 1) - zero > posThres / 20) {
+      if(data.at(a) > maxVal / 4) {
+	//printf("Found rise at sample: %d\n", a);
+	while(a - 1 >= 0 && data.at(a - 1) > maxVal / 20) {
 	  a--;
-	  printf("Backtracked to %d\n", a);
+	  //printf("Backtracked to %d\n", a);
 	}
 	short curLength = 0;
-	while(a + curLength < data.size() && data.at(a + curLength) - zero > posThres / 50) {
+	while(a + curLength < data.size() && data.at(a + curLength) > maxVal / 20) {
 	  curLength++;
 	}
 	segSizeMap[curLength] += 1;
@@ -150,34 +157,31 @@ int main(int argc, char *argv[])
       printf("SegLength: %d, SegCount: %d\n", pair.first, pair.second);
     }
   }
-  
+
+  std::vector<short> dataClean;
   // Clean and optimize
   {
     printf("Cleaning and optimizing");
     // Set bit length limits based on samplerate. This might need reworking
-    unsigned short bitLength = segSizes.at(0).second;
-    unsigned short bitLengthOpt = srcFile.samplerate() / 5512;
-    unsigned short minLen = srcFile.samplerate() / 11025;
-    unsigned short maxLen = srcFile.samplerate() / 1297;
+    unsigned short bitLength = segSizes.at(0).first;
+    unsigned short bitLengthOpt = srcFile.samplerate() / 4410;
+    unsigned short minLen = bitLength / 2;
+    unsigned short maxLen = (bitLength * 3) + (bitLength / 2);
     unsigned long dotMod = data.size() / 10;
-
-
+    printf("bitLength=%d\n", bitLength);
+    printf("bitLengthOpt=%d\n", bitLengthOpt);
+    printf("minLen=%d\n", minLen);
+    printf("maxLen=%d\n", maxLen);
     // Sample iteration
     for(int a = 0; a < data.size(); ++a) {
-      int segMax = 0;
-      int segMin = 0;
-      int zero = getZero(data, a, segLen, segMax, segMin);
-      int posThres = (segMax - zero) / 4;
-      int negThres = (segMin - zero) / 4;
       // Seek until threshold is exceeded
-      if((int)data.at(a) - zero > posThres) {
-	printf("Found rise at sample: %d\n", a);
-	while(a - 1 >= 0 && (int)data.at(a - 1) - zero > posThres / 20) {
+      if(data.at(a) > maxVal / 4) {
+	while(a - 1 >= 0 && data.at(a - 1) > maxVal / 20) {
 	  a--;
 	  dataClean.pop_back();
 	}
 	short curLength = 0;
-	while(a + curLength < data.size() && data.at(a + curLength) - zero > posThres / 50) {
+	while(a + curLength < data.size() && data.at(a + curLength) > maxVal / 20) {
 	  curLength++;
 	}
 	if(curLength <= minLen || curLength >= maxLen) {
@@ -186,19 +190,18 @@ int main(int argc, char *argv[])
 	  }
 	} else {
 	  //printf("Bitlength=%d!!!\n", curLength);
-	  for(int b = 0; b < round((double)curLength / (double)bitZer) * bitZerOpt; ++b) {
+	  for(int b = 0; b < round((double)curLength / (double)bitLength) * bitLengthOpt; ++b) {
 	    dataClean.push_back(SHRT_MAX / 4 * 3);
 	  }
 	}
 	a += curLength - 1;
-      } else if((int)data.at(a) - zero < negThres) {
-	printf("Found rise at sample: %d\n", a);
-	while(a - 1 >= 0 && (int)data.at(a - 1) - zero < negThres / 20) {
+      } else if(data.at(a) < minVal / 4) {
+	while(a - 1 >= 0 && data.at(a - 1) < minVal / 20) {
 	  a--;
 	  dataClean.pop_back();
 	}
 	short curLength = 0;
-	while(a + curLength < data.size() && data.at(a + curLength) - zero < negThres / 50) {
+	while(a + curLength < data.size() && data.at(a + curLength) < minVal / 20) {
 	  curLength++;
 	}
 	if(curLength <= minLen || curLength >= maxLen) {
@@ -207,7 +210,7 @@ int main(int argc, char *argv[])
 	  }
 	} else {
 	  //printf("Bitlength=%d!!!\n", curLength);
-	  for(int b = 0; b < round((double)curLength / (double)bitZer) * bitZerOpt; ++b) {
+	  for(int b = 0; b < round((double)curLength / (double)bitLength) * bitLengthOpt; ++b) {
 	    dataClean.push_back(SHRT_MIN / 4 * 3);
 	  }
 	}
@@ -223,7 +226,6 @@ int main(int argc, char *argv[])
     }
     printf(" Done!\n");
   }
-  */
   // Write
   {
     unsigned long dotMod = dataClean.size() / 10;
