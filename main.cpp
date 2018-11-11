@@ -32,6 +32,8 @@
 
 #include <sndfile.hh>
 
+#define BUFFER 1024
+
 int getZero(std::vector<short> &data, int idx, int span)
 {
   int segMax = data.at(idx);
@@ -64,13 +66,14 @@ int main(int argc, char *argv[])
     printf("Usage: tapeworm SOURCE [DESTINATION]\n");
     return 0;
   }
-  printf("Input: %s\n", srcName.c_str());
+  printf("Input: '%s'\n", srcName.c_str());
   SndfileHandle srcFile(srcName.c_str());
   printf("  Samplerate : %d\n", srcFile.samplerate()) ;
   printf("  Channels   : %d\n", srcFile.channels()) ;
-  printf("  Format     : %#08x\n", srcFile.format());
-  if(srcFile.samplerate() != 22050 && srcFile.samplerate() != 44100) {
-    printf("Error: File has samplerate of %d, tapeworm expects 22050 Hz or 44100 Hz, exiting...\n", srcFile.samplerate());
+  printf("  Frames     : %ld\n", srcFile.frames()) ;
+  //printf("  Format     : %#08x\n", srcFile.format());
+  if(srcFile.samplerate() < 22050) {
+    printf("Error: File has samplerate of %d, tapeworm expects 22050 Hz or more, exiting...\n", srcFile.samplerate());
     return 1;
   }
   if(srcFile.channels() != 1) {
@@ -83,12 +86,15 @@ int main(int argc, char *argv[])
 
   // Read
   {
-    short buffer;
+    short buffer[BUFFER];
     unsigned long dots = 0;
-    unsigned long dotMod = srcFile.frames() / 10;
-    printf("Reading from '%s'", srcName.c_str());
-    while(srcFile.read(&buffer, 1) != 0) {
-      data.push_back(buffer);
+    unsigned long dotMod = srcFile.frames() / BUFFER / 10;
+    printf("Reading data");
+    sf_count_t read = 0;
+    while(read = srcFile.read(buffer, BUFFER)) {
+      for(int a = 0; a < read; ++a) {
+	data.push_back(buffer[a]);
+      }
       if(dots % dotMod == 0) {
 	printf(".");
 	fflush(stdout);
@@ -99,9 +105,20 @@ int main(int argc, char *argv[])
   }
 
   // Zero adjust all data
-  for(int a = 0; a < data.size(); ++a) {
-    int zero = getZero(data, a, segLen);
-    data.at(a) = data.at(a) - zero;
+  {
+    printf("Zero adjusting data");
+    unsigned long dots = 0;
+    unsigned long dotMod = data.size() / 10;
+    for(int a = 0; a < data.size(); ++a) {
+      int zero = getZero(data, a, segLen);
+      data.at(a) = data.at(a) - zero;
+      if(dots % dotMod == 0) {
+	printf(".");
+	fflush(stdout);
+      }
+      dots++;
+    }
+    printf(" Done!\n");
   }
 
   // Set maximum and minimum sample value
@@ -115,21 +132,20 @@ int main(int argc, char *argv[])
       minVal = sample;
   }
 
-  typedef std::pair<short, short> pair;
+  typedef std::pair<short, long int> pair;
   std::vector<pair> segSizes;
+  unsigned short bitLength = 0;
   // Analyze
   {
     printf("Analyzing");
-    std::map<short, short> segSizeMap;
+    std::map<short, long int> segSizeMap;
     unsigned long dotMod = data.size() / 10;
     for(int a = 0; a < data.size(); ++a) {
       if(data.at(a) > maxVal / 4) {
-	//printf("Found rise at sample: %d\n", a);
 	while(a - 1 >= 0 && data.at(a - 1) > maxVal / 20) {
 	  a--;
-	  //printf("Backtracked to %d\n", a);
 	}
-	short curLength = 0;
+	short curLength = 1;
 	while(a + curLength < data.size() && data.at(a + curLength) > maxVal / 20) {
 	  curLength++;
 	}
@@ -153,25 +169,37 @@ int main(int argc, char *argv[])
     
     // print the vector
     printf(" Done!\n");
-    for (auto const &pair: segSizes) {
-      printf("SegLength: %d, SegCount: %d\n", pair.first, pair.second);
+    std::vector<short> relevant;
+    for(auto const &pair: segSizes) {
+      printf("segLength=%d, segCount=%ld\n", pair.first, pair.second);
+      if(pair.second > srcFile.frames() / 137)
+	relevant.push_back(pair.first);
     }
+    std::sort(relevant.begin(), relevant.end());
+    int segCount = 0;
+    for(int a = 0; a < 3; ++a) {
+      bitLength += relevant.at(a);
+      segCount++;
+      if(a + 1 < relevant.size() && abs(relevant.at(a + 1) - relevant.at(a)) >= 2) {
+	break;
+      }
+    }
+    bitLength = round((double)bitLength / (double)segCount);
   }
 
   std::vector<short> dataClean;
   // Clean and optimize
   {
-    printf("Cleaning and optimizing");
     // Set bit length limits based on samplerate. This might need reworking
-    unsigned short bitLength = segSizes.at(0).first;
-    unsigned short bitLengthOpt = srcFile.samplerate() / 4410;
+    unsigned short bitLengthOpt = srcFile.samplerate() / 5512;
     unsigned short minLen = bitLength / 2;
     unsigned short maxLen = (bitLength * 3) + (bitLength / 2);
     unsigned long dotMod = data.size() / 10;
-    printf("bitLength=%d\n", bitLength);
-    printf("bitLengthOpt=%d\n", bitLengthOpt);
-    printf("minLen=%d\n", minLen);
-    printf("maxLen=%d\n", maxLen);
+    printf("  Detected bitlength = %d\n", bitLength);
+    printf("  Optimal bitlength = %d\n", bitLengthOpt);
+    //printf("  minLen=%d\n", minLen);
+    //printf("  maxLen=%d\n", maxLen);
+    printf("Cleaning and optimizing");
     // Sample iteration
     for(int a = 0; a < data.size(); ++a) {
       // Seek until threshold is exceeded
@@ -189,7 +217,6 @@ int main(int argc, char *argv[])
 	    dataClean.push_back(0);
 	  }
 	} else {
-	  //printf("Bitlength=%d!!!\n", curLength);
 	  for(int b = 0; b < round((double)curLength / (double)bitLength) * bitLengthOpt; ++b) {
 	    dataClean.push_back(SHRT_MAX / 4 * 3);
 	  }
@@ -228,15 +255,23 @@ int main(int argc, char *argv[])
   }
   // Write
   {
-    unsigned long dotMod = dataClean.size() / 10;
     printf("Saving to '%s'", dstName.c_str()) ;
-    SndfileHandle dstFile(dstName.c_str(), SFM_WRITE, srcFile.format(), srcFile.channels(), srcFile.samplerate());
-    for(int a = 0; a < dataClean.size(); ++a) {
+    SndfileHandle dstFile(dstName.c_str(), SFM_WRITE, SF_FORMAT_WAV | SF_FORMAT_PCM_U8, srcFile.channels(), srcFile.samplerate());
+    unsigned long dotMod = dataClean.size() / BUFFER / 10;
+    short buffer[BUFFER];
+    for(int a = 0; a < dataClean.size(); a = a + BUFFER) {
+      sf_count_t write = 0;
+      for(int b = 0; b < BUFFER; ++b) {
+	if(a + b >= dataClean.size())
+	  break;
+	buffer[b] = dataClean.at(a + b);
+	write = b + 1;
+      }
+      dstFile.write(buffer, write);
       if(a % dotMod == 0) {
 	printf(".");
 	fflush(stdout);
       }
-      dstFile.write(&dataClean.at(a), 1);
     }
     printf(" Done!\n");
   }
@@ -246,6 +281,6 @@ int main(int argc, char *argv[])
 
 /* TODO
 - Analyze all data and group segment lengths in a map to determine what is zero, one and pause.
-- Maybe even segment wav into groups of 1024 samples and determine zero, one and pause for each in case we have a wobbly tape.
+- Maybe even segment wav into groups of BUFFER samples and determine zero, one and pause for each in case we have a wobbly tape.
 - Do running zero adjustments by continuously finding max and min samples and subtracting them from each other.
  */
