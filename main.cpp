@@ -171,7 +171,7 @@ int main(int argc, char *argv[])
     printf(" Done!\n");
     std::vector<short> relevant;
     for(auto const &pair: segSizes) {
-      printf("segLength=%d, segCount=%ld\n", pair.first, pair.second);
+      //printf("segLength=%d, segCount=%ld\n", pair.first, pair.second);
       if(pair.second > srcFile.frames() / 137)
 	relevant.push_back(pair.first);
     }
