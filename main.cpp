@@ -38,11 +38,19 @@
 #define ZERODIV 20
 #define ZEROSPAN 100
 
-int getZero(std::vector<short> &data, int idx, int span)
+void showProgress(unsigned long dots, unsigned long modulus)
+{
+  if(dots % modulus == 0) {
+    printf(".");
+    fflush(stdout);
+  }
+}
+
+int getZero(std::vector<short> &data, unsigned long idx, unsigned long span)
 {
   int segMax = data.at(idx);
   int segMin = data.at(idx);
-  for(int a = 0; a < span; ++a) {
+  for(unsigned long a = 0; a < span; ++a) {
     if(idx + a >= data.size())
       break;
     int sample = data.at(idx + a);
@@ -93,13 +101,13 @@ void pushOne(std::vector<short> &data, unsigned short &bitLengthOpt)
 }
 
 double stdDevFromAbs(std::vector<short> &data,
-		     long unsigned int idx,
-		     long unsigned int span,
+		     unsigned long idx,
+		     unsigned long span,
 		     short maxVal = SHRT_MAX,
 		     bool population = false)
 {
   std::vector<short> vec;
-  for(int a = 0; a < span; ++a) {
+  for(unsigned long a = 0; a < span; ++a) {
     if(abs(data.at(idx + a)) <= maxVal) {
       vec.push_back(abs(data.at(idx + a)));
     }
@@ -121,12 +129,12 @@ double stdDevFromAbs(std::vector<short> &data,
 }
 
 double meanFromAbs(std::vector<short> &data,
-		     long unsigned int idx,
-		     long unsigned int span,
+		     unsigned long idx,
+		     unsigned long span,
 		     short maxVal = SHRT_MAX)
 {
   std::vector<short> vec;
-  for(int a = 0; a < span; ++a) {
+  for(unsigned long a = 0; a < span; ++a) {
     if(abs(data.at(idx + a)) <= maxVal) {
       vec.push_back(abs(data.at(idx + a)));
     }
@@ -152,10 +160,7 @@ void readAll(std::vector<short> &data, SndfileHandle &srcFile)
     for(int a = 0; a < read; ++a) {
       data.push_back(buffer[a]);
     }
-    if(dots % dotMod == 0) {
-      printf(".");
-      fflush(stdout);
-    }
+    showProgress(dots, dotMod);
     dots++;
   }
   printf(" Done!\n");
@@ -167,16 +172,13 @@ void writeAll(std::vector<short> &data, SndfileHandle &dstFile, int zeroPadding 
   short buffer[BUFFER] = {0};
   short silence[zeroPadding] = {0};
   dstFile.write(silence, zeroPadding); // Initial zero padding
-  for(int a = 0; a < data.size(); a += BUFFER) {
+  for(unsigned long a = 0; a < data.size(); a += BUFFER) {
     sf_count_t write;
     for(write = 0; write < BUFFER; ++write) {
       if(a + write >= data.size())
 	break;
       buffer[write] = data.at(a + write);
-      if((a + write) % dotMod == 0) {
-	printf(".");
-	fflush(stdout);
-      }
+      showProgress(a + write, dotMod);
     }
     dstFile.write(buffer, write);
   }
@@ -190,13 +192,10 @@ void zeroAdjust(std::vector<short> &data, SndfileHandle &srcFile)
   printf("Zero adjusting data");
   unsigned long dots = 0;
   unsigned long dotMod = data.size() / 10;
-  for(int a = 0; a < data.size(); ++a) {
+  for(unsigned long a = 0; a < data.size(); ++a) {
     int zero = getZero(data, a, segLen);
     data.at(a) = data.at(a) - zero;
-    if(dots % dotMod == 0) {
-      printf(".");
-      fflush(stdout);
-    }
+    showProgress(dots, dotMod);
     dots++;
   }
   printf(" Done!\n");
@@ -266,7 +265,7 @@ int main(int argc, char *argv[])
   printf("  Signal trigger=%d\n", initThres);
   printf("  Zero level=%d\n", zeroThres);
   
-  typedef std::pair<short, long int> pair;
+  typedef std::pair<short, long> pair;
   std::vector<pair> segSizes;
   double bitLength = 0.0;
   // Analyze
@@ -275,9 +274,10 @@ int main(int argc, char *argv[])
     short neededBits = 512;
     short dotMod = neededBits / 10;
     std::vector<short> bitLengths;
-    short noSignal = 0;
-    for(int a = 0; a < data.size(); ++a) {
-      // Detect signal rise that indicate bit begin
+    unsigned long noSignal = 0;
+    short noSignalMax = srcFile.samplerate() / 1102; // About 20 for 22050 Hz
+    for(unsigned long a = 0; a < data.size(); ++a) {
+      // Detect signal begin
       if(data.at(a) > initThres) {
 	short curLength = 0;
 	while(data.at(a + curLength) >= 0 &&
@@ -293,14 +293,12 @@ int main(int argc, char *argv[])
 	  break;
 	}
 	a += curLength - 1;
-	if(bitLengths.size() % dotMod) {
-	  printf(".");
-	  fflush(stdout);
-	}
+	showProgress(bitLengths.size(), dotMod);
       } else {
 	noSignal++;
       }
-      if(noSignal == 20) {
+      if(bitLengths.size() && noSignal >= noSignalMax) {
+	printf("Resetting at %ld, I guess it was just a spike\n", a);
 	bitLengths.clear();
 	noSignal = 0;
       }
@@ -311,7 +309,7 @@ int main(int argc, char *argv[])
     bitLength /= bitLengths.size() / 2;
     printf(" Done!\n");
   }
-
+  
   std::vector<short> dataClean;
   // Clean and optimize
   {
@@ -320,24 +318,23 @@ int main(int argc, char *argv[])
     unsigned short minLen = bitLength / 4;
     unsigned short maxLen = bitLength * 3 + bitLength / 4;
     unsigned long dotMod = data.size() / 10;
-    printf("  Detected zero bitlength = %f (appr. %f baud)\n", bitLength, srcFile.samplerate() / bitLength);
-    printf("  Optimal zero bitlength = %d\n", bitLengthOpt);
+    printf("  Detected zero bitlength = %f (%f baud)\n", bitLength, srcFile.samplerate() / bitLength);
     printf("  minLen=%d\n", minLen);
     printf("  maxLen=%d\n", maxLen);
     printf("Cleaning and optimizing");
     bool inData = false;
     // Sample iteration
     short allowedNullData = 0;
-    for(int a = 0; a < data.size(); ++a) {
+    for(unsigned long a = 0; a < data.size(); ++a) {
       // Detect signal drop that indicate bit begin
       if(data.at(a) < minVal / INITDIV) {
 	// Backtrack to bit beginning
 	while(a - 1 >= 0 && data.at(a - 1) < minVal / ZERODIV) {
 	  a--;
 	}
-	long int loLen = 0;
-	long int hiLen = 0;
-	long int totLen = 0;
+	unsigned long loLen = 0;
+	unsigned long hiLen = 0;
+	unsigned long totLen = 0;
 	// Drop phase
 	while(a + totLen < data.size() && data.at(a + totLen) <= 0) {
 	  loLen++;
@@ -389,11 +386,7 @@ int main(int argc, char *argv[])
 	  dataClean.push_back(0);
 	}
       }
-	      
-      if(a % dotMod == 0) {
-	printf(".");
-	fflush(stdout);
-      }
+      showProgress(a, dotMod);
     }
     printf(" Done!\n");
   }
