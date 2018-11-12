@@ -29,12 +29,14 @@
 #include <math.h>
 #include <algorithm>
 #include <map>
+#include <numeric>
 
 #include <sndfile.hh>
 
 #define BUFFER 1024
 #define INITDIV 4
 #define ZERODIV 20
+#define ZEROSPAN 100
 
 int getZero(std::vector<short> &data, int idx, int span)
 {
@@ -90,10 +92,120 @@ void pushOne(std::vector<short> &data, unsigned short &bitLengthOpt)
   }
 }
 
+double stdDevFromAbs(std::vector<short> &data,
+		     long unsigned int idx,
+		     long unsigned int span,
+		     short maxVal = SHRT_MAX,
+		     bool population = false)
+{
+  std::vector<short> vec;
+  for(int a = 0; a < span; ++a) {
+    if(abs(data.at(idx + a)) <= maxVal) {
+      vec.push_back(abs(data.at(idx + a)));
+    }
+  }
+  if(vec.size() < span / 2) {
+    printf("Warning: Low quality standard deviation calculation.\n");
+  }
+  
+  double sum = std::accumulate(vec.begin(), vec.end(), 0.0);
+  double mean = sum / vec.size();
+  printf("mean from absolutes=%f\n", mean);
+  std::vector<double> diff(vec.size());
+  std::transform(vec.begin(), vec.end(), diff.begin(), [mean](double x) { return x - mean; });
+  double sqSum = std::inner_product(diff.begin(), diff.end(), diff.begin(), 0.0);
+  double variance = sqSum / (vec.size() - (int)population);
+  double stdDev = std::sqrt(variance);
+
+  return stdDev;
+}
+
+double meanFromAbs(std::vector<short> &data,
+		     long unsigned int idx,
+		     long unsigned int span,
+		     short maxVal = SHRT_MAX)
+{
+  std::vector<short> vec;
+  for(int a = 0; a < span; ++a) {
+    if(abs(data.at(idx + a)) <= maxVal) {
+      vec.push_back(abs(data.at(idx + a)));
+    }
+  }
+  if(vec.size() < span / 2) {
+    printf("Warning: Low quality mean calculation.\n");
+  }
+  
+  double sum = std::accumulate(vec.begin(), vec.end(), 0.0);
+  double mean = sum / vec.size();
+
+  return mean;
+}
+
+void readAll(std::vector<short> &data, SndfileHandle &srcFile)
+{
+  short buffer[BUFFER];
+  unsigned long dots = 0;
+  unsigned long dotMod = srcFile.frames() / BUFFER / 10;
+  printf("Reading data");
+  sf_count_t read = 0;
+  while(read = srcFile.read(buffer, BUFFER)) {
+    for(int a = 0; a < read; ++a) {
+      data.push_back(buffer[a]);
+    }
+    if(dots % dotMod == 0) {
+      printf(".");
+      fflush(stdout);
+    }
+    dots++;
+  }
+  printf(" Done!\n");
+}
+
+void writeAll(std::vector<short> &data, SndfileHandle &dstFile, int zeroPadding = 0)
+{
+  unsigned long dotMod = ceil(data.size() / 10.0);
+  short buffer[BUFFER] = {0};
+  short silence[zeroPadding] = {0};
+  dstFile.write(silence, zeroPadding); // Initial zero padding
+  for(int a = 0; a < data.size(); a += BUFFER) {
+    sf_count_t write;
+    for(write = 0; write < BUFFER; ++write) {
+      if(a + write >= data.size())
+	break;
+      buffer[write] = data.at(a + write);
+      if((a + write) % dotMod == 0) {
+	printf(".");
+	fflush(stdout);
+      }
+    }
+    dstFile.write(buffer, write);
+  }
+  dstFile.write(silence, zeroPadding); // Trailing zero padding
+  printf(" Done!\n");
+}
+
+void zeroAdjust(std::vector<short> &data, SndfileHandle &srcFile)
+{
+  int segLen = srcFile.samplerate() / 1102; // 20 for a 22050 Hz file
+  printf("Zero adjusting data");
+  unsigned long dots = 0;
+  unsigned long dotMod = data.size() / 10;
+  for(int a = 0; a < data.size(); ++a) {
+    int zero = getZero(data, a, segLen);
+    data.at(a) = data.at(a) - zero;
+    if(dots % dotMod == 0) {
+      printf(".");
+      fflush(stdout);
+    }
+    dots++;
+  }
+  printf(" Done!\n");
+}
+
 int main(int argc, char *argv[])
 {
   printf("TapeWorm: A Memotech wav tapefile cleaner and optimizer by Lars Muldjord 2018\n");
-  std::string srcName;
+  std::string srcName = "input.wav"; // Name will always be changed, but set just in case
   std::string dstName = "output.wav"; // Name will always be changed, but set just in case
   if(argc == 2) {
     srcName = argv[1];
@@ -121,68 +233,18 @@ int main(int argc, char *argv[])
   }
 
   std::vector<short> data;
-  int segLen = srcFile.samplerate() / 1102; // 20 for a 22050 kHz file
 
   // Read
-  {
-    short buffer[BUFFER];
-    unsigned long dots = 0;
-    unsigned long dotMod = srcFile.frames() / BUFFER / 10;
-    printf("Reading data");
-    sf_count_t read = 0;
-    while(read = srcFile.read(buffer, BUFFER)) {
-      for(int a = 0; a < read; ++a) {
-	data.push_back(buffer[a]);
-      }
-      if(dots % dotMod == 0) {
-	printf(".");
-	fflush(stdout);
-      }
-      dots++;
-    }
-    printf(" Done!\n");
-  }
+  readAll(data, srcFile);
 
   // Zero adjust all data
-  {
-    printf("Zero adjusting data");
-    unsigned long dots = 0;
-    unsigned long dotMod = data.size() / 10;
-    for(int a = 0; a < data.size(); ++a) {
-      int zero = getZero(data, a, segLen);
-      data.at(a) = data.at(a) - zero;
-      if(dots % dotMod == 0) {
-	printf(".");
-	fflush(stdout);
-      }
-      dots++;
-    }
-    printf(" Done!\n");
-  }
+  zeroAdjust(data, srcFile);
 
   // Write zero adjusted
   {
-    printf("Saving to 'zero_adjusted.wav'");
+    printf("Writing to 'zero_adjusted.wav'");
     SndfileHandle dstFile("zero_adjusted.wav", SFM_WRITE, SF_FORMAT_WAV | SF_FORMAT_PCM_U8, srcFile.channels(), srcFile.samplerate());
-    unsigned long dotMod = data.size() / BUFFER / 10;
-    short buffer[BUFFER] = {0};
-    dstFile.write(buffer, BUFFER); // Write a couple of silent buffers. Some players don't play
-    dstFile.write(buffer, BUFFER); // the first part, so a bit of silence is important
-    for(int a = 0; a < data.size(); a = a + BUFFER) {
-      sf_count_t write = 0;
-      for(int b = 0; b < BUFFER; ++b) {
-	if(a + b >= data.size())
-	  break;
-	buffer[b] = data.at(a + b);
-	write = b + 1;
-      }
-      dstFile.write(buffer, write);
-      if(a % dotMod == 0) {
-	printf(".");
-	fflush(stdout);
-      }
-    }
-    printf(" Done!\n");
+    writeAll(data, dstFile);
   }
 
   // Set maximum and minimum sample value
@@ -195,68 +257,59 @@ int main(int argc, char *argv[])
     if(sample < minVal)
       minVal = sample;
   }
-
+  printf("maxVal=%d\n", maxVal);
+  printf("minVal=%d\n", minVal);
+  int initThres = stdDevFromAbs(data, 0, data.size());
+  int zeroThres = (meanFromAbs(data, 0, ZEROSPAN, initThres / 2) +
+		   meanFromAbs(data, data.size() - ZEROSPAN, ZEROSPAN, initThres / 2));
+  printf("Detected thresholds:\n");
+  printf("  Signal trigger=%d\n", initThres);
+  printf("  Zero level=%d\n", zeroThres);
+  
   typedef std::pair<short, long int> pair;
   std::vector<pair> segSizes;
-  unsigned short bitLength = 0;
+  double bitLength = 0.0;
   // Analyze
   {
     printf("Analyzing");
-    std::map<short, long int> segSizeMap;
-    unsigned long dotMod = data.size() / 10;
+    short neededBits = 512;
+    short dotMod = neededBits / 10;
+    std::vector<short> bitLengths;
+    short noSignal = 0;
     for(int a = 0; a < data.size(); ++a) {
-      // Detect signal drop that indicate bit begin
-      if(data.at(a) < minVal / INITDIV) {
-	// Backtrack to bit beginning
-	while(a - 1 >= 0 && data.at(a - 1) < minVal / ZERODIV) {
-	  a--;
-	}
-	int curLength = 1;
-	// Drop phase
-	while(a + curLength < data.size() && data.at(a + curLength) < maxVal / INITDIV) {
+      // Detect signal rise that indicate bit begin
+      if(data.at(a) > initThres) {
+	short curLength = 0;
+	while(data.at(a + curLength) >= 0 &&
+	      a + curLength < data.size()) {
 	  curLength++;
 	}
-	// Rise phase
-	while(a + curLength < data.size() && data.at(a + curLength) > maxVal / ZERODIV) {
+	while(data.at(a + curLength) <= initThres &&
+	      a + curLength < data.size()) {
 	  curLength++;
 	}
-	segSizeMap[curLength] += 1;
+	bitLengths.push_back(curLength);
+	if(bitLengths.size() == neededBits) {
+	  break;
+	}
 	a += curLength - 1;
+	if(bitLengths.size() % dotMod) {
+	  printf(".");
+	  fflush(stdout);
+	}
+      } else {
+	noSignal++;
       }
-      if(a % dotMod == 0) {
-	printf(".");
-	fflush(stdout);
+      if(noSignal == 20) {
+	bitLengths.clear();
+	noSignal = 0;
       }
     }
-    std::copy(segSizeMap.begin(),
-	      segSizeMap.end(),
-	      std::back_inserter<std::vector<pair>>(segSizes));
-    std::sort(segSizes.begin(), segSizes.end(),
-	      [](const pair& segLength, const pair& segCount) {
-                if (segLength.second != segCount.second)
-		  return segLength.second > segCount.second;
-                return segLength.first > segCount.first;
-	      });
-    
-    // print the vector
+    for(int a = bitLengths.size() / 2; a < bitLengths.size(); ++a) {
+      bitLength += bitLengths.at(a);
+    }
+    bitLength /= bitLengths.size() / 2;
     printf(" Done!\n");
-    std::vector<short> relevant;
-    for(int a = 0; a < segSizes.size() - 1; ++a) {
-      if(segSizes.at(a).second > srcFile.frames() / 137) {
-	relevant.push_back(segSizes.at(a).first);
-	printf("segLength=%d, segCount=%ld\n", segSizes.at(a).first, segSizes.at(a).second);
-      }
-    }
-    std::sort(relevant.begin(), relevant.end());
-    int segCount = 0;
-    for(int a = 0; a < 3; ++a) {
-      bitLength += relevant.at(a);
-      segCount++;
-      if(a + 1 < relevant.size() && abs(relevant.at(a + 1) - relevant.at(a)) >= 2) {
-	break;
-      }
-    }
-    bitLength = round((double)bitLength / (double)segCount);
   }
 
   std::vector<short> dataClean;
@@ -267,7 +320,7 @@ int main(int argc, char *argv[])
     unsigned short minLen = bitLength / 4;
     unsigned short maxLen = bitLength * 3 + bitLength / 4;
     unsigned long dotMod = data.size() / 10;
-    printf("  Detected zero bitlength = %d (appr. %d baud)\n", bitLength, srcFile.samplerate() / bitLength);
+    printf("  Detected zero bitlength = %f (appr. %f baud)\n", bitLength, srcFile.samplerate() / bitLength);
     printf("  Optimal zero bitlength = %d\n", bitLengthOpt);
     printf("  minLen=%d\n", minLen);
     printf("  maxLen=%d\n", maxLen);
@@ -327,7 +380,7 @@ int main(int argc, char *argv[])
       } else {
 	if(inData) {
 	  if(!--allowedNullData) {
-	    printf("STOPBIT!!!\n");
+	    //printf("STOPBIT!!!\n");
 	    // Push stop bit
 	    pushStop(dataClean, bitLengthOpt);
 	    inData = false;
@@ -344,35 +397,28 @@ int main(int argc, char *argv[])
     }
     printf(" Done!\n");
   }
+
   // Write
   {
-    printf("Saving to '%s'", dstName.c_str());
+    printf("Writing to '%s'", dstName.c_str());
     SndfileHandle dstFile(dstName.c_str(), SFM_WRITE, SF_FORMAT_WAV | SF_FORMAT_PCM_U8, srcFile.channels(), srcFile.samplerate());
-    unsigned long dotMod = dataClean.size() / BUFFER / 10;
-    short buffer[BUFFER] = {0};
-    dstFile.write(buffer, BUFFER); // Write a couple of silent buffers. Some players don't play
-    dstFile.write(buffer, BUFFER); // the first part, so a bit of silence is important
-    for(int a = 0; a < dataClean.size(); a = a + BUFFER) {
-      sf_count_t write = 0;
-      for(int b = 0; b < BUFFER; ++b) {
-	if(a + b >= dataClean.size())
-	  break;
-	buffer[b] = dataClean.at(a + b);
-	write = b + 1;
-      }
-      dstFile.write(buffer, write);
-      if(a % dotMod == 0) {
-	printf(".");
-	fflush(stdout);
-      }
-    }
-    printf(" Done!\n");
+    writeAll(dataClean, dstFile, srcFile.samplerate());
   }
-
   return 0;
 }
 
 /* TODO
+NEW:
+- Lav std dev på al data. Frasorter al data der ligger over/under std dev'en. Al tilbageværende data tages der gennemsnit af. Det er min silence threshold. Det kan være jeg kun behøver kigge på data > 0. Ellers kan jeg lave abs på al data før udregningerne.
+- Segmenter data i klumper af 1024. Tag max og min for hvert segment ved at finde det højeste og laveste tal. Lav vector med hver enkelt segments max og min. Tag gennemsnittet af dem og brug dem init threshold, men nok divideret med 2. Det kan være det er nok med kun at finde max, da jeg jo har zero adjusted. Så er nedenstående også nemmere, da jeg kan nøjes med en if abs(sample) > max / 2 til både negativ og positiv signalretning.
+- Jeg behøver ikke lave zero cross detection. Jeg skal bare lave init threshold detection hele tiden. Med en abs på. Det vil give mig distancen mellem to pulser.
+- Det gør ikke noget at jeg har det "grimme" rise grundet zero adjustment. Jeg skal bare sørge for at den er for lang, så bliver den discarded og lavet til nuller i final signal.
+
+- Der er en udfordring i signaler i Mission Alphatron, hvor enkelte bits ikke er clean, så enten neg eller pos pulsen er for kort.
+- Ovenstående kan fikses ved at lave en state machine. pause state (bare stilhed), wait signal state (en masse 0'er), init state (en enkelt lang puls i enten neg eller pos retning), og data state (bits). stop state (der kommer igen stilhed, der skal indsættes et stop).
+
+
+OLD:
 - Analyze all data and group segment lengths in a map to determine what is zero, one and pause.
 - Maybe even segment wav into groups of BUFFER samples and determine zero, one and pause for each in case we have a wobbly tape.
 - Do running zero adjustments by continuously finding max and min samples and subtracting them from each other.
