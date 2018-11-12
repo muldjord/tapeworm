@@ -39,13 +39,16 @@
 
 #define PAUS 42
 #define TRIG 43
-#define DATA 44
+#define WAIT 44
+#define DATA 45
 
 #define RISE 666
 #define FALL 667
 #define NONE 668
 
-void showProgress(unsigned long dots, unsigned long modulus)
+unsigned short bitLengthOpt = 0;
+
+void showProgress(long dots, long modulus)
 {
   if(dots % modulus == 0) {
     printf(".");
@@ -53,11 +56,11 @@ void showProgress(unsigned long dots, unsigned long modulus)
   }
 }
 
-int getZero(std::vector<short> &data, unsigned long idx, unsigned long span)
+int getZero(std::vector<short> &data, long idx, long span)
 {
   int segMax = data.at(idx);
   int segMin = data.at(idx);
-  for(unsigned long a = 0; a < span; ++a) {
+  for(long a = 0; a < span; ++a) {
     if(idx + a >= data.size())
       break;
     int sample = data.at(idx + a);
@@ -70,7 +73,7 @@ int getZero(std::vector<short> &data, unsigned long idx, unsigned long span)
   return zero;
 }
 
-void pushInit(std::vector<short> &data, unsigned short &bitLengthOpt)
+void pushInit(std::vector<short> &data)
 {
   for(int b = 0; b < ceil(bitLengthOpt / 2.0); ++b) {
     data.push_back(SHRT_MIN);
@@ -80,41 +83,45 @@ void pushInit(std::vector<short> &data, unsigned short &bitLengthOpt)
   }
 }
 
-void pushStop(std::vector<short> &data, unsigned short &bitLengthOpt)
+void pushStop(std::vector<short> &data)
 {
   for(int b = 0; b < bitLengthOpt * 2; ++b) {
     data.push_back(SHRT_MIN);
   }
 }
 
-void pushZero(std::vector<short> &data, unsigned short &bitLengthOpt)
+void pushZero(std::vector<short> &data, int count = 1)
 {
-  for(int b = 0; b < ceil(bitLengthOpt / 2.0); ++b) {
-    data.push_back(SHRT_MIN);
-  }
-  for(int b = 0; b < floor(bitLengthOpt / 2.0); ++b) {
-    data.push_back(SHRT_MAX);
+  while(count--) {
+    for(int b = 0; b < ceil(bitLengthOpt / 2.0); ++b) {
+      data.push_back(SHRT_MIN);
+    }
+    for(int b = 0; b < floor(bitLengthOpt / 2.0); ++b) {
+      data.push_back(SHRT_MAX);
+    }
   }
 }
 
-void pushOne(std::vector<short> &data, unsigned short &bitLengthOpt)
+void pushOne(std::vector<short> &data, int count = 1)
 {
-  for(int b = 0; b < bitLengthOpt; ++b) {
-    data.push_back(SHRT_MIN);
-  }
-  for(int b = 0; b < bitLengthOpt; ++b) {
-    data.push_back(SHRT_MAX);
+  while(count--) {
+    for(int b = 0; b < bitLengthOpt; ++b) {
+      data.push_back(SHRT_MIN);
+    }
+    for(int b = 0; b < bitLengthOpt; ++b) {
+      data.push_back(SHRT_MAX);
+    }
   }
 }
 
 double stdDevFromAbs(std::vector<short> &data,
-		     unsigned long idx,
-		     unsigned long span,
+		     long idx,
+		     long span,
 		     short maxVal = SHRT_MAX,
 		     bool population = false)
 {
   std::vector<short> vec;
-  for(unsigned long a = 0; a < span; ++a) {
+  for(long a = 0; a < span; ++a) {
     if(abs(data.at(idx + a)) <= maxVal) {
       vec.push_back(abs(data.at(idx + a)));
     }
@@ -136,12 +143,12 @@ double stdDevFromAbs(std::vector<short> &data,
 }
 
 double meanFromAbs(std::vector<short> &data,
-		     unsigned long idx,
-		     unsigned long span,
+		     long idx,
+		     long span,
 		     short maxVal = SHRT_MAX)
 {
   std::vector<short> vec;
-  for(unsigned long a = 0; a < span; ++a) {
+  for(long a = 0; a < span; ++a) {
     if(abs(data.at(idx + a)) <= maxVal) {
       vec.push_back(abs(data.at(idx + a)));
     }
@@ -159,8 +166,8 @@ double meanFromAbs(std::vector<short> &data,
 void readAll(std::vector<short> &data, SndfileHandle &srcFile)
 {
   short buffer[BUFFER];
-  unsigned long dots = 0;
-  unsigned long dotMod = srcFile.frames() / BUFFER / 10;
+  long dots = 0;
+  long dotMod = srcFile.frames() / BUFFER / 10;
   printf("Reading data");
   sf_count_t read = 0;
   while(read = srcFile.read(buffer, BUFFER)) {
@@ -175,11 +182,11 @@ void readAll(std::vector<short> &data, SndfileHandle &srcFile)
 
 void writeAll(std::vector<short> &data, SndfileHandle &dstFile, int zeroPadding = 0)
 {
-  unsigned long dotMod = ceil(data.size() / 10.0);
+  long dotMod = ceil(data.size() / 10.0);
   short buffer[BUFFER] = {0};
   short silence[zeroPadding] = {0};
   dstFile.write(silence, zeroPadding); // Initial zero padding
-  for(unsigned long a = 0; a < data.size(); a += BUFFER) {
+  for(long a = 0; a < data.size(); a += BUFFER) {
     sf_count_t write;
     for(write = 0; write < BUFFER; ++write) {
       if(a + write >= data.size())
@@ -197,9 +204,9 @@ void zeroAdjust(std::vector<short> &data, SndfileHandle &srcFile)
 {
   int segLen = srcFile.samplerate() / 1102; // 20 for a 22050 Hz file
   printf("Zero adjusting data");
-  unsigned long dots = 0;
-  unsigned long dotMod = data.size() / 10;
-  for(unsigned long a = 0; a < data.size(); ++a) {
+  long dots = 0;
+  long dotMod = data.size() / 10;
+  for(long a = 0; a < data.size(); ++a) {
     int zero = getZero(data, a, segLen);
     data.at(a) = data.at(a) - zero;
     showProgress(dots, dotMod);
@@ -281,9 +288,9 @@ int main(int argc, char *argv[])
     short neededBits = 512;
     short dotMod = neededBits / 10;
     std::vector<short> bitLengths;
-    unsigned long noSignal = 0;
+    long noSignal = 0;
     short noSignalMax = srcFile.samplerate() / 1102; // About 20 for 22050 Hz
-    for(unsigned long a = 0; a < data.size(); ++a) {
+    for(long a = 0; a < data.size(); ++a) {
       // Detect signal begin
       if(data.at(a) > initThres) {
 	short curLength = 0;
@@ -321,17 +328,18 @@ int main(int argc, char *argv[])
   // Clean and optimize
   {
     // Set bit length limits based on samplerate. This might need reworking
-    unsigned short bitLengthOpt = srcFile.samplerate() / 2450;
-    unsigned short minLen = bitLength / 4;
-    unsigned short maxLen = bitLength * 3 + bitLength / 4;
-    unsigned long dotMod = data.size() / 10;
+    double flutter = bitLength / 6.0; // 1.5 for bitLength of 9
+    double shortPulse = bitLength / 2.0;
+    double mediumPulse = shortPulse * 2;
+    double longPulse = shortPulse * 2;
+    bitLengthOpt = srcFile.samplerate() / 2450;
+    long dotMod = data.size() / 10;
     printf("  Detected zero bitlength = %f (%f baud)\n", bitLength, srcFile.samplerate() / bitLength);
-    printf("  minLen=%d\n", minLen);
-    printf("  maxLen=%d\n", maxLen);
     printf("Cleaning and optimizing");
     short state = PAUS;
     short direction = NONE;
-    for(unsigned long a = 0; a < data.size(); ++a) {
+    std::string pulseBuffer = "";
+    for(long a = 0; a < data.size(); ++a) {
       if(state == PAUS) {
 	if(abs(data.at(a)) > initThres) {
 	  if(data.at(a) > 0) {
@@ -345,40 +353,94 @@ int main(int argc, char *argv[])
 	}
       }
       if(state == TRIG) {
+	long b = a;
 	// First, seek to next zero crossing forwards
 	if(direction == RISE) {
 	  while(a + 1 < data.size() && data.at(a) > 0) {
-	    ++a;
+	    a++;
 	  }
 	  direction = FALL;
 	} else if(direction == FALL) {
 	  while(a + 1 < data.size() && data.at(a) < 0) {
-	    ++a;
+	    a++;
 	  }
 	  direction = RISE;
 	}
-	state = DATA;
+	printf("Zero crossing at %ld...\n", a);
+	while(b++ < a) {
+	  dataClean.push_back(0);
+	}
+	state = WAIT;
+      }
+      if(state == WAIT) {
+	long b = a;
+	if(direction == RISE) {
+	  while(a < data.size() && data.at(a) >= 0) {
+	    a++;
+	  }
+	  direction = FALL;
+	} else if(direction == FALL) {
+	  while(a < data.size() && data.at(a) <= 0) {
+	    a++;
+	  }
+	  direction = RISE;
+	}
+	b = a - b + 1;
+	if(b <= shortPulse + flutter &&
+	   b >= shortPulse - flutter) {
+	  pulseBuffer.append("s");
+	} else {
+	  if(pulseBuffer.size() >= 32) {
+	    printf("Yay, we got a full wait signal!\n");
+	    pushZero(dataClean, pulseBuffer.size() / 2);
+	    pushInit(dataClean);
+	    state = DATA;
+	  } else {
+	    while(b++ < a) {
+	      dataClean.push_back(0);
+	    }
+	    state = PAUS;
+	  }
+	  pulseBuffer = "";
+	}
       }
       if(state == DATA) {
-	long unsigned tickLength = 0;
-	long unsigned tockLength = 0;
+	printf("First real data at %ld\n", a);
+	long b = a;
 	if(direction == RISE) {
-	  while(data.at(a) >= 0) {
-	    tickLength++;
+	  while(a < data.size() && data.at(a) >= 0) {
+	    a++;
 	  }
-	  while(data.at(a) < 0) {
-	    tockLength++;
-	  }
+	  direction = FALL;
 	} else if(direction == FALL) {
-	  while(data.at(a) <= 0) {
-	    tickLength++;
+	  while(a < data.size() && data.at(a) <= 0) {
+	    a++;
 	  }
-	  while(data.at(a) > 0) {
-	    tockLength++;
-	  }
+	  direction = RISE;
 	}
-	
-	a += tickLength + tockLength;
+	b = a - b + 1;
+	if(b <= shortPulse + flutter) {
+	  printf("Appended s\n");
+	  pulseBuffer.append("s");
+	} else if(b <= mediumPulse + flutter) {
+	  printf("Appended m\n");
+	  pulseBuffer.append("m");
+	} else {
+	  printf("Unexpected pulse ending at %ld, resetting\n", a);
+	  pulseBuffer = "";
+	  printf("Buffer is %ld\n", b);
+	  state = PAUS;
+	}
+	break;
+	if(pulseBuffer.size() == 2) {
+	  if(pulseBuffer == "ss") {
+	    pushZero(dataClean);
+	  } else if(pulseBuffer == "mm") {
+	    pushOne(dataClean);
+	  } else {
+	  }
+	  pulseBuffer = "";
+	}
       }
     }
   }
@@ -414,16 +476,16 @@ OLD Processig code
     bool inData = false;
     // Sample iteration
     short allowedNullData = 0;
-    for(unsigned long a = 0; a < data.size(); ++a) {
+    for(long a = 0; a < data.size(); ++a) {
       // Detect signal drop that indicate bit begin
       if(data.at(a) < minVal / INITDIV) {
 	// Backtrack to bit beginning
 	while(a - 1 >= 0 && data.at(a - 1) < minVal / ZERODIV) {
 	  a--;
 	}
-	unsigned long loLen = 0;
-	unsigned long hiLen = 0;
-	unsigned long totLen = 0;
+	long loLen = 0;
+	long hiLen = 0;
+	long totLen = 0;
 	// Drop phase
 	while(a + totLen < data.size() && data.at(a + totLen) <= 0) {
 	  loLen++;
