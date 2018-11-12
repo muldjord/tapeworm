@@ -34,9 +34,16 @@
 #include <sndfile.hh>
 
 #define BUFFER 1024
-#define INITDIV 4
-#define ZERODIV 20
+
 #define ZEROSPAN 100
+
+#define PAUS 42
+#define TRIG 43
+#define DATA 44
+
+#define RISE 666
+#define FALL 667
+#define NONE 668
 
 void showProgress(unsigned long dots, unsigned long modulus)
 {
@@ -322,6 +329,88 @@ int main(int argc, char *argv[])
     printf("  minLen=%d\n", minLen);
     printf("  maxLen=%d\n", maxLen);
     printf("Cleaning and optimizing");
+    short state = PAUS;
+    short direction = NONE;
+    for(unsigned long a = 0; a < data.size(); ++a) {
+      if(state == PAUS) {
+	if(abs(data.at(a)) > initThres) {
+	  if(data.at(a) > 0) {
+	    direction = RISE;
+	  } else {
+	    direction = FALL;
+	  }
+	  state = TRIG;
+	} else {
+	  dataClean.push_back(0);
+	}
+      }
+      if(state == TRIG) {
+	// First, seek to next zero crossing forwards
+	if(direction == RISE) {
+	  while(a + 1 < data.size() && data.at(a) > 0) {
+	    ++a;
+	  }
+	  direction = FALL;
+	} else if(direction == FALL) {
+	  while(a + 1 < data.size() && data.at(a) < 0) {
+	    ++a;
+	  }
+	  direction = RISE;
+	}
+	state = DATA;
+      }
+      if(state == DATA) {
+	long unsigned tickLength = 0;
+	long unsigned tockLength = 0;
+	if(direction == RISE) {
+	  while(data.at(a) >= 0) {
+	    tickLength++;
+	  }
+	  while(data.at(a) < 0) {
+	    tockLength++;
+	  }
+	} else if(direction == FALL) {
+	  while(data.at(a) <= 0) {
+	    tickLength++;
+	  }
+	  while(data.at(a) > 0) {
+	    tockLength++;
+	  }
+	}
+	
+	a += tickLength + tockLength;
+      }
+    }
+  }
+
+  // Write
+  {
+    printf("Writing to '%s'", dstName.c_str());
+    SndfileHandle dstFile(dstName.c_str(), SFM_WRITE, SF_FORMAT_WAV | SF_FORMAT_PCM_U8, srcFile.channels(), srcFile.samplerate());
+    writeAll(dataClean, dstFile, srcFile.samplerate());
+  }
+  return 0;
+}
+
+/* TODO
+NEW:
+- Lav std dev på al data. Frasorter al data der ligger over/under std dev'en. Al tilbageværende data tages der gennemsnit af. Det er min silence threshold. Det kan være jeg kun behøver kigge på data > 0. Ellers kan jeg lave abs på al data før udregningerne.
+- Segmenter data i klumper af 1024. Tag max og min for hvert segment ved at finde det højeste og laveste tal. Lav vector med hver enkelt segments max og min. Tag gennemsnittet af dem og brug dem init threshold, men nok divideret med 2. Det kan være det er nok med kun at finde max, da jeg jo har zero adjusted. Så er nedenstående også nemmere, da jeg kan nøjes med en if abs(sample) > max / 2 til både negativ og positiv signalretning.
+- Jeg behøver ikke lave zero cross detection. Jeg skal bare lave init threshold detection hele tiden. Med en abs på. Det vil give mig distancen mellem to pulser.
+- Det gør ikke noget at jeg har det "grimme" rise grundet zero adjustment. Jeg skal bare sørge for at den er for lang, så bliver den discarded og lavet til nuller i final signal.
+
+- Der er en udfordring i signaler i Mission Alphatron, hvor enkelte bits ikke er clean, så enten neg eller pos pulsen er for kort.
+- Ovenstående kan fikses ved at lave en state machine. pause state (bare stilhed), wait signal state (en masse 0'er), init state (en enkelt lang puls i enten neg eller pos retning), og data state (bits). stop state (der kommer igen stilhed, der skal indsættes et stop).
+
+
+OLD:
+- Analyze all data and group segment lengths in a map to determine what is zero, one and pause.
+- Maybe even segment wav into groups of BUFFER samples and determine zero, one and pause for each in case we have a wobbly tape.
+- Do running zero adjustments by continuously finding max and min samples and subtracting them from each other.
+ */
+
+/*
+OLD Processig code
     bool inData = false;
     // Sample iteration
     short allowedNullData = 0;
@@ -346,13 +435,6 @@ int main(int argc, char *argv[])
 	  totLen++;
 	}
 	if(totLen <= minLen || totLen >= maxLen) {
-	  /*
-	  if(inData) {
-	    printf("STOPBIT!!!\n");
-	    // Push stop bit
-	    pushStop(dataClean, bitLengthOpt);
-	  }
-	  */
 	  inData = false;
 	  for(int b = 0; b < totLen; ++b) {
 	    dataClean.push_back(0);
@@ -389,30 +471,4 @@ int main(int argc, char *argv[])
       showProgress(a, dotMod);
     }
     printf(" Done!\n");
-  }
-
-  // Write
-  {
-    printf("Writing to '%s'", dstName.c_str());
-    SndfileHandle dstFile(dstName.c_str(), SFM_WRITE, SF_FORMAT_WAV | SF_FORMAT_PCM_U8, srcFile.channels(), srcFile.samplerate());
-    writeAll(dataClean, dstFile, srcFile.samplerate());
-  }
-  return 0;
-}
-
-/* TODO
-NEW:
-- Lav std dev på al data. Frasorter al data der ligger over/under std dev'en. Al tilbageværende data tages der gennemsnit af. Det er min silence threshold. Det kan være jeg kun behøver kigge på data > 0. Ellers kan jeg lave abs på al data før udregningerne.
-- Segmenter data i klumper af 1024. Tag max og min for hvert segment ved at finde det højeste og laveste tal. Lav vector med hver enkelt segments max og min. Tag gennemsnittet af dem og brug dem init threshold, men nok divideret med 2. Det kan være det er nok med kun at finde max, da jeg jo har zero adjusted. Så er nedenstående også nemmere, da jeg kan nøjes med en if abs(sample) > max / 2 til både negativ og positiv signalretning.
-- Jeg behøver ikke lave zero cross detection. Jeg skal bare lave init threshold detection hele tiden. Med en abs på. Det vil give mig distancen mellem to pulser.
-- Det gør ikke noget at jeg har det "grimme" rise grundet zero adjustment. Jeg skal bare sørge for at den er for lang, så bliver den discarded og lavet til nuller i final signal.
-
-- Der er en udfordring i signaler i Mission Alphatron, hvor enkelte bits ikke er clean, så enten neg eller pos pulsen er for kort.
-- Ovenstående kan fikses ved at lave en state machine. pause state (bare stilhed), wait signal state (en masse 0'er), init state (en enkelt lang puls i enten neg eller pos retning), og data state (bits). stop state (der kommer igen stilhed, der skal indsættes et stop).
-
-
-OLD:
-- Analyze all data and group segment lengths in a map to determine what is zero, one and pause.
-- Maybe even segment wav into groups of BUFFER samples and determine zero, one and pause for each in case we have a wobbly tape.
-- Do running zero adjustments by continuously finding max and min samples and subtracting them from each other.
- */
+*/
