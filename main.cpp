@@ -46,6 +46,8 @@
 #define FALL 667
 #define NONE 668
 
+//#define DEBUG
+
 unsigned short bitLengthOpt = 0;
 
 void showProgress(long dots, long modulus)
@@ -75,6 +77,9 @@ int getZero(std::vector<short> &data, long idx, long span)
 
 void pushInit(std::vector<short> &data)
 {
+#ifdef DEBUG
+  printf("Pushing INIT\n");
+#endif
   for(int b = 0; b < ceil(bitLengthOpt / 2.0); ++b) {
     data.push_back(SHRT_MIN);
   }
@@ -85,7 +90,10 @@ void pushInit(std::vector<short> &data)
 
 void pushStop(std::vector<short> &data)
 {
-  for(int b = 0; b < bitLengthOpt * 2; ++b) {
+#ifdef DEBUG
+  printf("Pushing STOP\n");
+#endif
+  for(int b = 0; b < bitLengthOpt * 4; ++b) {
     data.push_back(SHRT_MIN);
   }
 }
@@ -93,6 +101,9 @@ void pushStop(std::vector<short> &data)
 void pushZero(std::vector<short> &data, int count = 1)
 {
   while(count--) {
+#ifdef DEBUG
+    printf("Pushing ZERO\n");
+#endif
     for(int b = 0; b < ceil(bitLengthOpt / 2.0); ++b) {
       data.push_back(SHRT_MIN);
     }
@@ -105,6 +116,9 @@ void pushZero(std::vector<short> &data, int count = 1)
 void pushOne(std::vector<short> &data, int count = 1)
 {
   while(count--) {
+#ifdef DEBUG
+    printf("Pushing ONE\n");
+#endif
     for(int b = 0; b < bitLengthOpt; ++b) {
       data.push_back(SHRT_MIN);
     }
@@ -132,7 +146,6 @@ double stdDevFromAbs(std::vector<short> &data,
   
   double sum = std::accumulate(vec.begin(), vec.end(), 0.0);
   double mean = sum / vec.size();
-  printf("mean from absolutes=%f\n", mean);
   std::vector<double> diff(vec.size());
   std::transform(vec.begin(), vec.end(), diff.begin(), [mean](double x) { return x - mean; });
   double sqSum = std::inner_product(diff.begin(), diff.end(), diff.begin(), 0.0);
@@ -165,7 +178,7 @@ double meanFromAbs(std::vector<short> &data,
 
 void readAll(std::vector<short> &data, SndfileHandle &srcFile)
 {
-  short buffer[BUFFER];
+  short buffer[BUFFER] = {0};
   long dots = 0;
   long dotMod = srcFile.frames() / BUFFER / 10;
   printf("Reading data");
@@ -253,14 +266,17 @@ int main(int argc, char *argv[])
   // Zero adjust all data
   zeroAdjust(data, srcFile);
 
+#ifdef DEBUG
   // Write zero adjusted
   {
     printf("Writing to 'zero_adjusted.wav'");
     SndfileHandle dstFile("zero_adjusted.wav", SFM_WRITE, SF_FORMAT_WAV | SF_FORMAT_PCM_U8, srcFile.channels(), srcFile.samplerate());
     writeAll(data, dstFile);
   }
+#endif
 
   // Set maximum and minimum sample value
+  /*
   int maxVal = 0;
   int minVal = 0;
   for(int a = 0; a < data.size(); ++a) {
@@ -270,14 +286,20 @@ int main(int argc, char *argv[])
     if(sample < minVal)
       minVal = sample;
   }
+
   printf("maxVal=%d\n", maxVal);
   printf("minVal=%d\n", minVal);
+  */
   int initThres = stdDevFromAbs(data, 0, data.size());
+  /*
   int zeroThres = (meanFromAbs(data, 0, ZEROSPAN, initThres / 2) +
 		   meanFromAbs(data, data.size() - ZEROSPAN, ZEROSPAN, initThres / 2));
-  printf("Detected thresholds:\n");
+  */
+#ifdef DEBUG
+  printf("Calculated values:\n");
   printf("  Signal trigger=%d\n", initThres);
-  printf("  Zero level=%d\n", zeroThres);
+#endif
+  //printf("  Zero level=%d\n", zeroThres);
   
   typedef std::pair<short, long> pair;
   std::vector<pair> segSizes;
@@ -312,7 +334,9 @@ int main(int argc, char *argv[])
 	noSignal++;
       }
       if(bitLengths.size() && noSignal >= noSignalMax) {
+#ifdef DEBUG
 	printf("Resetting at %ld, I guess it was just a spike\n", a);
+#endif
 	bitLengths.clear();
 	noSignal = 0;
       }
@@ -332,13 +356,15 @@ int main(int argc, char *argv[])
     double shortPulse = bitLength / 2.0;
     double mediumPulse = bitLength;
     double longPulse = mediumPulse + shortPulse;
+#ifdef DEBUG
     printf("Flutter:%f\n", flutter);
     printf("shortPulse:%f\n", shortPulse);
     printf("mediumPulse:%f\n", mediumPulse);
     printf("longPulse:%f\n", longPulse);
+#endif
     bitLengthOpt = srcFile.samplerate() / 2450;
     long dotMod = data.size() / 10;
-    printf("  Detected zero bitlength = %f (%f baud)\n", bitLength, srcFile.samplerate() / bitLength);
+    printf("  Medium pulse length = %f (%d baud)\n", bitLength, (int)(srcFile.samplerate() / bitLength));
     printf("Cleaning and optimizing");
     short state = PAUS;
     short direction = NONE;
@@ -355,29 +381,9 @@ int main(int argc, char *argv[])
 	} else {
 	  dataClean.push_back(0);
 	}
-      }
-      if(state == TRIG) {
+      } else if(state == TRIG) {
 	long b = a;
-	// First, seek to next zero crossing forwards
-	if(direction == RISE) {
-	  while(a + 1 < data.size() && data.at(a) > 0) {
-	    a++;
-	  }
-	  direction = FALL;
-	} else if(direction == FALL) {
-	  while(a + 1 < data.size() && data.at(a) < 0) {
-	    a++;
-	  }
-	  direction = RISE;
-	}
-	printf("Zero crossing at %ld...\n", a);
-	while(b++ < a) {
-	  dataClean.push_back(0);
-	}
-	state = WAIT;
-      }
-      if(state == WAIT) {
-	long b = a;
+	// Seek to next zero crossing
 	if(direction == RISE) {
 	  while(a < data.size() && data.at(a) >= 0) {
 	    a++;
@@ -389,51 +395,71 @@ int main(int argc, char *argv[])
 	  }
 	  direction = RISE;
 	}
-	b = a - b + 1;
-	if(b <= shortPulse + flutter &&
-	   b >= shortPulse - flutter) {
+#ifdef DEBUG
+	printf("Zero crossing at %ld...\n", a);
+#endif
+	while(b++ < a) {
+	  dataClean.push_back(0);
+	}
+	state = WAIT;
+      } else if(state == WAIT) {
+	long b = a;
+	if(direction == RISE) {
+	  while(a < data.size() && data.at(a) > 0) {
+	    a++;
+	  }
+	  direction = FALL;
+	} else if(direction == FALL) {
+	  while(a < data.size() && data.at(a) < 0) {
+	    a++;
+	  }
+	  direction = RISE;
+	}
+	long pulseLen = a - b + 1;
+	if(pulseLen <= shortPulse + flutter &&
+	   pulseLen >= shortPulse - flutter) {
 	  pulseBuffer.append("s");
 	} else {
 	  if(pulseBuffer.size() >= 64) {
-	    printf("Yay, we got a full wait signal!\n");
+#ifdef DEBUG
+	    printf("Accepting wait signal with a length of %ld!\n", pulseBuffer.size());
+#endif
+	    pushInit(dataClean);
 	    pushZero(dataClean, pulseBuffer.size() / 2);
 	    pushInit(dataClean);
 	    state = DATA;
 	  } else {
-	    while(b--) {
+	    while(pulseLen--) {
 	      dataClean.push_back(0);
 	    }
 	    state = PAUS;
 	  }
 	  pulseBuffer = "";
 	}
-      }
-      if(state == DATA) {
-	printf("First real data at %ld\n", a);
+      } else if(state == DATA) {
 	long b = a;
 	if(direction == RISE) {
-	  while(a < data.size() && data.at(a) >= 0) {
+	  while(a < data.size() && data.at(a) > 0) {
 	    a++;
 	  }
 	  direction = FALL;
 	} else if(direction == FALL) {
-	  while(a < data.size() && data.at(a) <= 0) {
+	  while(a < data.size() && data.at(a) < 0) {
 	    a++;
 	  }
 	  direction = RISE;
 	}
-	b = a - b;
-	printf("b=%ld\n", b);
-	if(b <= shortPulse + flutter) {
-	  printf("Appended s\n");
+	long pulseLen = a - b + 1;
+	if(pulseLen <= shortPulse + flutter) {
 	  pulseBuffer.append("s");
-	} else if(b <= mediumPulse + (flutter * 2)) {
-	  printf("Appended m\n");
+	} else if(pulseLen <= mediumPulse + (flutter * 2)) {
 	  pulseBuffer.append("m");
 	} else {
-	  printf("Unexpected pulse ending at %ld, resetting\n", a);
+	  pushStop(dataClean);
+#ifdef DEBUG
+	  printf("Data ended or malformed bit at %ld, pushing stopsignal and resetting\n", a);
+#endif
 	  pulseBuffer = "";
-	  printf("Buffer is %ld\n", b);
 	  state = PAUS;
 	}
 	if(pulseBuffer.size() == 2) {
@@ -441,12 +467,19 @@ int main(int argc, char *argv[])
 	    pushZero(dataClean);
 	  } else if(pulseBuffer == "mm") {
 	    pushOne(dataClean);
+	  } else if(pulseBuffer == "ms") {
+	    pushOne(dataClean);
+	  } else if(pulseBuffer == "sm") {
+	    pushOne(dataClean);
 	  } else {
+	    printf("Malformed bit %s ending at %ld\n", pulseBuffer.c_str(), a);
 	  }
 	  pulseBuffer = "";
 	}
       }
+      showProgress(a, dotMod);
     }
+    printf(" Done!\n");
   }
 
   // Write
