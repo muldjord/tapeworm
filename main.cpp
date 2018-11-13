@@ -328,10 +328,14 @@ int main(int argc, char *argv[])
   // Clean and optimize
   {
     // Set bit length limits based on samplerate. This might need reworking
-    double flutter = bitLength / 6.0; // 1.5 for bitLength of 9
+    double flutter = bitLength / 4.0;
     double shortPulse = bitLength / 2.0;
-    double mediumPulse = shortPulse * 2;
-    double longPulse = shortPulse * 2;
+    double mediumPulse = bitLength;
+    double longPulse = mediumPulse + shortPulse;
+    printf("Flutter:%f\n", flutter);
+    printf("shortPulse:%f\n", shortPulse);
+    printf("mediumPulse:%f\n", mediumPulse);
+    printf("longPulse:%f\n", longPulse);
     bitLengthOpt = srcFile.samplerate() / 2450;
     long dotMod = data.size() / 10;
     printf("  Detected zero bitlength = %f (%f baud)\n", bitLength, srcFile.samplerate() / bitLength);
@@ -390,13 +394,13 @@ int main(int argc, char *argv[])
 	   b >= shortPulse - flutter) {
 	  pulseBuffer.append("s");
 	} else {
-	  if(pulseBuffer.size() >= 32) {
+	  if(pulseBuffer.size() >= 64) {
 	    printf("Yay, we got a full wait signal!\n");
 	    pushZero(dataClean, pulseBuffer.size() / 2);
 	    pushInit(dataClean);
 	    state = DATA;
 	  } else {
-	    while(b++ < a) {
+	    while(b--) {
 	      dataClean.push_back(0);
 	    }
 	    state = PAUS;
@@ -418,11 +422,12 @@ int main(int argc, char *argv[])
 	  }
 	  direction = RISE;
 	}
-	b = a - b + 1;
+	b = a - b;
+	printf("b=%ld\n", b);
 	if(b <= shortPulse + flutter) {
 	  printf("Appended s\n");
 	  pulseBuffer.append("s");
-	} else if(b <= mediumPulse + flutter) {
+	} else if(b <= mediumPulse + (flutter * 2)) {
 	  printf("Appended m\n");
 	  pulseBuffer.append("m");
 	} else {
@@ -431,7 +436,6 @@ int main(int argc, char *argv[])
 	  printf("Buffer is %ld\n", b);
 	  state = PAUS;
 	}
-	break;
 	if(pulseBuffer.size() == 2) {
 	  if(pulseBuffer == "ss") {
 	    pushZero(dataClean);
