@@ -37,7 +37,7 @@
 
 #define ZEROSPAN 100
 
-#define PAUS 42
+#define SLEEP 42
 #define TRIG 43
 #define WAIT 44
 #define DATA 45
@@ -48,9 +48,7 @@
 
 #define DEBUG
 
-unsigned short bitLengthOpt = 0;
-
-void showProgress(long dots, long modulus)
+void showProgress(const long dots, const long modulus)
 {
   if(dots % modulus == 0) {
     printf(".");
@@ -58,7 +56,33 @@ void showProgress(long dots, long modulus)
   }
 }
 
-int getZero(std::vector<short> &data, long idx, long span)
+short getDirection(const short &currentValue)
+{
+  if(currentValue >= 0) {
+    return RISE;
+  } else {
+    return FALL;
+  }
+}
+
+long getPulseLength(const std::vector<short> &data, long &idx, const short &direction)
+{
+  long startIdx = idx;
+  if(direction == RISE) {
+    while(idx < startIdx + 50 && idx < data.size() && data.at(idx) >= 0) {
+      idx++;
+    }
+  } else if(direction == FALL) {
+    while(idx < startIdx + 50 && idx < data.size() && data.at(idx) < 0) {
+      idx++;
+    }
+  }
+  long pulseLength = idx - startIdx + 1;
+
+  return pulseLength;
+}
+
+int getZero(const std::vector<short> &data, const long idx, const long span)
 {
   int segMax = data.at(idx);
   int segMin = data.at(idx);
@@ -75,58 +99,109 @@ int getZero(std::vector<short> &data, long idx, long span)
   return zero;
 }
 
-void pushInit(std::vector<short> &data)
+void pushShort(std::vector<short> &data,
+	      const unsigned short &pulseLengthOptimal,
+	      const short direction)
+{
+  if(direction == RISE) {
+    int b = ceil(pulseLengthOptimal / 2.0);
+    while(b--) {
+      data.push_back(SHRT_MAX);
+    }
+  } else if(direction == FALL) {
+    int b = floor(pulseLengthOptimal / 2.0);
+    while(b--) {
+      data.push_back(SHRT_MIN);
+    }
+  }
+}
+
+void pushMedium(std::vector<short> &data,
+		const unsigned short &pulseLengthOptimal,
+		const short direction)
+{
+  if(direction == RISE) {
+    int b = floor(pulseLengthOptimal);
+    while(b--) {
+      data.push_back(SHRT_MAX);
+    }
+  } else if(direction == FALL) {
+    int b = ceil(pulseLengthOptimal);
+    while(b--) {
+      data.push_back(SHRT_MIN);
+    }
+  }
+}
+
+void pushLong(std::vector<short> &data,
+	      const unsigned short &pulseLengthOptimal,
+	      const short direction)
+{
+  if(direction == RISE) {
+    int b = ceil(pulseLengthOptimal + pulseLengthOptimal / 2.0);
+    while(b--) {
+      data.push_back(SHRT_MAX);
+    }
+  } else if(direction == FALL) {
+    int b = floor(pulseLengthOptimal + pulseLengthOptimal / 2.0);
+    while(b--) {
+      data.push_back(SHRT_MIN);
+    }
+  }
+}
+
+void pushInit(std::vector<short> &data, const unsigned short &pulseLengthOptimal)
 {
 #ifdef DEBUG
   printf("Pushing INIT\n");
 #endif
-  for(int b = 0; b < ceil(bitLengthOpt / 2.0); ++b) {
+  for(int b = 0; b < ceil(pulseLengthOptimal / 2.0); ++b) {
     data.push_back(SHRT_MIN);
   }
-  for(int b = 0; b < bitLengthOpt + ceil(bitLengthOpt / 2.0); ++b) {
+  for(int b = 0; b < pulseLengthOptimal + ceil(pulseLengthOptimal / 2.0); ++b) {
     data.push_back(SHRT_MAX);
   }
 }
 
-void pushStop(std::vector<short> &data)
+void pushStop(std::vector<short> &data, const unsigned short &pulseLengthOptimal)
 {
 #ifdef DEBUG
   printf("Pushing STOP\n");
 #endif
-  for(int b = 0; b < bitLengthOpt * 4; ++b) {
+  for(int b = 0; b < pulseLengthOptimal * 4; ++b) {
     data.push_back(SHRT_MIN);
   }
 }
 
-void pushZero(std::vector<short> &data, int count = 1)
+void pushZero(std::vector<short> &data, const unsigned short &pulseLengthOptimal, int count = 1)
 {
   while(count--) {
-    for(int b = 0; b < ceil(bitLengthOpt / 2.0); ++b) {
+    for(int b = 0; b < ceil(pulseLengthOptimal / 2.0); ++b) {
       data.push_back(SHRT_MIN);
     }
-    for(int b = 0; b < floor(bitLengthOpt / 2.0); ++b) {
+    for(int b = 0; b < floor(pulseLengthOptimal / 2.0); ++b) {
       data.push_back(SHRT_MAX);
     }
   }
 }
 
-void pushOne(std::vector<short> &data, int count = 1)
+void pushOne(std::vector<short> &data, const unsigned short &pulseLengthOptimal, int count = 1)
 {
   while(count--) {
-    for(int b = 0; b < bitLengthOpt; ++b) {
+    for(int b = 0; b < pulseLengthOptimal; ++b) {
       data.push_back(SHRT_MIN);
     }
-    for(int b = 0; b < bitLengthOpt; ++b) {
+    for(int b = 0; b < pulseLengthOptimal; ++b) {
       data.push_back(SHRT_MAX);
     }
   }
 }
 
-double stdDevFromAbs(std::vector<short> &data,
-		     long idx,
-		     long span,
-		     short maxVal = SHRT_MAX,
-		     bool population = false)
+double stdDevFromAbs(const std::vector<short> &data,
+		     const long idx,
+		     const long span,
+		     const short maxVal = SHRT_MAX,
+		     const bool population = false)
 {
   std::vector<short> vec;
   for(long a = 0; a < span; ++a) {
@@ -149,10 +224,10 @@ double stdDevFromAbs(std::vector<short> &data,
   return stdDev;
 }
 
-double meanFromAbs(std::vector<short> &data,
-		     long idx,
-		     long span,
-		     short maxVal = SHRT_MAX)
+double meanFromAbs(const std::vector<short> &data,
+		   const long idx,
+		   const long span,
+		   const short maxVal = SHRT_MAX)
 {
   std::vector<short> vec;
   for(long a = 0; a < span; ++a) {
@@ -187,7 +262,7 @@ void readAll(std::vector<short> &data, SndfileHandle &srcFile)
   printf(" Done!\n");
 }
 
-void writeAll(std::vector<short> &data, SndfileHandle &dstFile, int zeroPadding = 0)
+void writeAll(const std::vector<short> &data, SndfileHandle &dstFile, const int zeroPadding = 0)
 {
   long dotMod = ceil(data.size() / 10.0);
   short buffer[BUFFER] = {0};
@@ -207,14 +282,13 @@ void writeAll(std::vector<short> &data, SndfileHandle &dstFile, int zeroPadding 
   printf(" Done!\n");
 }
 
-void zeroAdjust(std::vector<short> &data, SndfileHandle &srcFile)
+void zeroAdjust(std::vector<short> &data, int segmentLength)
 {
-  int segLen = srcFile.samplerate() / 1102; // 20 for a 22050 Hz file
   printf("Zero adjusting data");
   long dots = 0;
   long dotMod = data.size() / 10;
   for(long a = 0; a < data.size(); ++a) {
-    int zero = getZero(data, a, segLen);
+    int zero = getZero(data, a, segmentLength);
     data.at(a) = data.at(a) - zero;
     showProgress(dots, dotMod);
     dots++;
@@ -258,7 +332,7 @@ int main(int argc, char *argv[])
   readAll(data, srcFile);
 
   // Zero adjust all data
-  zeroAdjust(data, srcFile);
+  zeroAdjust(data, srcFile.samplerate() / 1102);
 
 #ifdef DEBUG
   // Write zero adjusted
@@ -328,9 +402,6 @@ int main(int argc, char *argv[])
 	noSignal++;
       }
       if(bitLengths.size() && noSignal >= noSignalMax) {
-#ifdef DEBUG
-	printf("Resetting at %ld, I guess it was just a spike\n", a);
-#endif
 	bitLengths.clear();
 	noSignal = 0;
       }
@@ -351,124 +422,81 @@ int main(int argc, char *argv[])
     double mediumPulse = bitLength;
     double longPulse = mediumPulse + shortPulse;
 #ifdef DEBUG
-    printf("Flutter:%f\n", flutter);
-    printf("shortPulse : %f\n", shortPulse);
-    printf("mediumPulse: %f\n", mediumPulse);
-    printf("longPulse  : %f\n", longPulse);
+    printf("Flutter     : %f samples\n", flutter);
+    printf("Short pulse : %f samples\n", shortPulse);
+    printf("Medium Pulse: %f samples\n", mediumPulse);
+    printf("Long Pulse  : %f samples\n", longPulse);
 #endif
-    bitLengthOpt = srcFile.samplerate() / 2450;
+    short unsigned pulseLengthOptimal = srcFile.samplerate() / 2450;
     long dotMod = data.size() / 10;
-    printf("  Medium pulse length = %f (%d baud)\n", bitLength, (int)(srcFile.samplerate() / bitLength));
+    printf("  Zero bit length = %f (%d baud)\n", bitLength, (int)(srcFile.samplerate() / bitLength));
     printf("Cleaning and optimizing");
-    short state = PAUS;
+    short state = SLEEP;
     short direction = NONE;
-    std::string pulseBuffer = "";
+    std::string bitBuffer = "";
+    // Process all samples and push detected bits to dataClean vector
     for(long a = 0; a < data.size(); ++a) {
-      if(state == PAUS) {
+      if(state == SLEEP) {
 	if(abs(data.at(a)) > initThres) {
-	  if(data.at(a) > 0) {
-	    direction = RISE;
-	  } else {
-	    direction = FALL;
-	  }
 	  state = TRIG;
-	} else {
-	  dataClean.push_back(0);
 	}
-      } else if(state == TRIG) {
+	dataClean.push_back(0);
+      }
+      if(state == TRIG) {
 	long b = a;
 	// Seek to next zero crossing
 	if(direction == RISE) {
 	  while(a < data.size() && data.at(a) >= 0) {
 	    a++;
 	  }
-	  direction = FALL;
 	} else if(direction == FALL) {
-	  while(a < data.size() && data.at(a) <= 0) {
+	  while(a < data.size() && data.at(a) < 0) {
 	    a++;
 	  }
-	  direction = RISE;
 	}
-	while(b++ < a) {
+	while(b++ <= a) {
 	  dataClean.push_back(0);
 	}
-	state = WAIT;
-      } else if(state == WAIT) {
-	long b = a;
-	if(direction == RISE) {
-	  while(a < data.size() && data.at(a) > 0) {
-	    a++;
-	  }
-	  direction = FALL;
-	} else if(direction == FALL) {
-	  while(a < data.size() && data.at(a) < 0) {
-	    a++;
-	  }
-	  direction = RISE;
-	}
-	long pulseLen = a - b + 1;
-	if(pulseLen <= shortPulse + flutter &&
-	   pulseLen >= shortPulse - flutter) {
-	  pulseBuffer.append("s");
+	state = DATA;
+      }
+      if(state == WAIT) {
+	direction = getDirection(data.at(a));
+	long pulseLength = getPulseLength(data, a, direction);
+	if(pulseLength <= shortPulse + flutter &&
+	   pulseLength >= shortPulse - flutter) {
+	  bitBuffer.append("s");
 	} else {
-	  if(pulseBuffer.size() >= 64) {
+	  if(bitBuffer.size() >= 64) {
 #ifdef DEBUG
-	    printf("Accepting wait signal with a length of %ld!\n", pulseBuffer.size());
+	    printf("Accepting wait signal with a length of %ld!\n", bitBuffer.size());
 #endif
-	    pushInit(dataClean);
-	    pushZero(dataClean, pulseBuffer.size() / 2);
-	    pushInit(dataClean);
+	    pushInit(dataClean, pulseLengthOptimal);
+	    pushZero(dataClean, pulseLengthOptimal, bitBuffer.size() / 2);
+	    pushInit(dataClean, pulseLengthOptimal);
 	    state = DATA;
 	  } else {
-	    while(pulseLen--) {
+	    while(pulseLength--) {
 	      dataClean.push_back(0);
 	    }
-	    state = PAUS;
+	    state = SLEEP;
 	  }
-	  pulseBuffer = "";
+	  bitBuffer = "";
 	}
       } else if(state == DATA) {
-	long b = a;
-	if(direction == RISE) {
-	  while(a < data.size() && data.at(a) > 0) {
-	    a++;
-	  }
-	  direction = FALL;
-	} else if(direction == FALL) {
-	  while(a < data.size() && data.at(a) < 0) {
-	    a++;
-	  }
-	  direction = RISE;
-	}
-	long pulseLen = a - b + 1;
-	if(pulseLen <= shortPulse + flutter) {
-	  pulseBuffer.append("s");
-	} else if(pulseLen <= mediumPulse + flutter) {
-	  pulseBuffer.append("m");
-	} else if(pulseLen <= longPulse + flutter) {
-	  state = WAIT;
-	  pulseBuffer.append("l");
+	direction = getDirection(data.at(a));
+	long pulseLength = getPulseLength(data, a, direction);
+	if(pulseLength <= shortPulse + flutter) {
+	  pushShort(dataClean, pulseLengthOptimal, direction);
+	} else if(pulseLength <= mediumPulse + flutter) {
+	  pushMedium(dataClean, pulseLengthOptimal, direction);
+	} else if(pulseLength <= longPulse + flutter) {
+	  pushLong(dataClean, pulseLengthOptimal, direction);
 	} else {
 #ifdef DEBUG
 	  printf("Data ended or malformed bit at %ld, pushing stopsignal and resetting\n", a);
 #endif
-	  pushStop(dataClean);
-	  pulseBuffer = "";
-	  state = PAUS;
-	}
-	if(pulseBuffer.size() == 2) {
-	  if(pulseBuffer == "ss") {
-	    pushZero(dataClean);
-	  } else if(pulseBuffer == "mm") {
-	    pushOne(dataClean);
-	  } else if(pulseBuffer == "ms") {
-	    pushOne(dataClean);
-	  } else if(pulseBuffer == "sm") {
-	    pushOne(dataClean);
-	  } else {
-	    printf("Malformed bit %s ending at %ld\n", pulseBuffer.c_str(), a);
-	  }
-	  pulseBuffer = "";
+	  pushStop(dataClean, pulseLengthOptimal);
+	  state = SLEEP;
 	}
       }
       showProgress(a, dotMod);
@@ -538,14 +566,14 @@ OLD Processig code
 	  if(abs(loLen - bitLength / 2) < abs(loLen - bitLength)) {
 	    if(abs(hiLen - bitLength / 2) < abs(hiLen - bitLength)) {
 	      // Push 0 bit
-	      pushZero(dataClean, bitLengthOpt);
+	      pushZero(dataClean, pulseLengthOptimal);
 	    } else {
 	      // Push init bit
-	      pushInit(dataClean, bitLengthOpt);
+	      pushInit(dataClean, pulseLengthOptimal);
 	    }
 	  } else {
 	    // Push 1 bit
-	    pushOne(dataClean, bitLengthOpt);
+	    pushOne(dataClean, pulseLengthOptimal);
 	  }
 	}
 	a += totLen - 1;
@@ -554,7 +582,7 @@ OLD Processig code
 	  if(!--allowedNullData) {
 	    //printf("STOPBIT!!!\n");
 	    // Push stop bit
-	    pushStop(dataClean, bitLengthOpt);
+	    pushStop(dataClean, pulseLengthOptimal);
 	    inData = false;
 	  }
 	} else {
@@ -580,15 +608,15 @@ OLD Processig code
     printf("mediumPulse: %f\n", mediumPulse);
     printf("longPulse  : %f\n", longPulse);
 #endif
-    bitLengthOpt = srcFile.samplerate() / 2450;
+    pulseLengthOptimal = srcFile.samplerate() / 2450;
     long dotMod = data.size() / 10;
     printf("  Medium pulse length = %f (%d baud)\n", bitLength, (int)(srcFile.samplerate() / bitLength));
     printf("Cleaning and optimizing");
-    short state = PAUS;
+    short state = SLEEP;
     short direction = NONE;
-    std::string pulseBuffer = "";
+    std::string bitBuffer = "";
     for(long a = 0; a < data.size(); ++a) {
-      if(state == PAUS) {
+      if(state == SLEEP) {
 	if(abs(data.at(a)) > initThres) {
 	  if(data.at(a) > 0) {
 	    direction = RISE;
@@ -630,26 +658,26 @@ OLD Processig code
 	  }
 	  direction = RISE;
 	}
-	long pulseLen = a - b + 1;
-	if(pulseLen <= shortPulse + flutter &&
-	   pulseLen >= shortPulse - flutter) {
-	  pulseBuffer.append("s");
+	long pulseLength = a - b + 1;
+	if(pulseLength <= shortPulse + flutter &&
+	   pulseLength >= shortPulse - flutter) {
+	  bitBuffer.append("s");
 	} else {
-	  if(pulseBuffer.size() >= 64) {
+	  if(bitBuffer.size() >= 64) {
 #ifdef DEBUG
-	    printf("Accepting wait signal with a length of %ld!\n", pulseBuffer.size());
+	    printf("Accepting wait signal with a length of %ld!\n", bitBuffer.size());
 #endif
 	    pushInit(dataClean);
-	    pushZero(dataClean, pulseBuffer.size() / 2);
+	    pushZero(dataClean, bitBuffer.size() / 2);
 	    pushInit(dataClean);
 	    state = DATA;
 	  } else {
-	    while(pulseLen--) {
+	    while(pulseLength--) {
 	      dataClean.push_back(0);
 	    }
-	    state = PAUS;
+	    state = SLEEP;
 	  }
-	  pulseBuffer = "";
+	  bitBuffer = "";
 	}
       } else if(state == DATA) {
 	long b = a;
@@ -664,35 +692,35 @@ OLD Processig code
 	  }
 	  direction = RISE;
 	}
-	long pulseLen = a - b + 1;
-	if(pulseLen <= shortPulse + flutter) {
-	  pulseBuffer.append("s");
-	} else if(pulseLen <= mediumPulse + flutter) {
-	  pulseBuffer.append("m");
-	} else if(pulseLen <= longPulse + flutter) {
+	long pulseLength = a - b + 1;
+	if(pulseLength <= shortPulse + flutter) {
+	  bitBuffer.append("s");
+	} else if(pulseLength <= mediumPulse + flutter) {
+	  bitBuffer.append("m");
+	} else if(pulseLength <= longPulse + flutter) {
 	  state = WAIT;
-	  pulseBuffer.append("l");
+	  bitBuffer.append("l");
 	} else {
 #ifdef DEBUG
 	  printf("Data ended or malformed bit at %ld, pushing stopsignal and resetting\n", a);
 #endif
 	  pushStop(dataClean);
-	  pulseBuffer = "";
-	  state = PAUS;
+	  bitBuffer = "";
+	  state = SLEEP;
 	}
-	if(pulseBuffer.size() == 2) {
-	  if(pulseBuffer == "ss") {
+	if(bitBuffer.size() == 2) {
+	  if(bitBuffer == "ss") {
 	    pushZero(dataClean);
-	  } else if(pulseBuffer == "mm") {
+	  } else if(bitBuffer == "mm") {
 	    pushOne(dataClean);
-	  } else if(pulseBuffer == "ms") {
+	  } else if(bitBuffer == "ms") {
 	    pushOne(dataClean);
-	  } else if(pulseBuffer == "sm") {
+	  } else if(bitBuffer == "sm") {
 	    pushOne(dataClean);
 	  } else {
-	    printf("Malformed bit %s ending at %ld\n", pulseBuffer.c_str(), a);
+	    printf("Malformed bit %s ending at %ld\n", bitBuffer.c_str(), a);
 	  }
-	  pulseBuffer = "";
+	  bitBuffer = "";
 	}
       }
       showProgress(a, dotMod);
