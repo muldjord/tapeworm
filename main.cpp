@@ -433,7 +433,7 @@ int main(int argc, char *argv[])
     printf("Cleaning and optimizing");
     short state = SLEEP;
     short direction = NONE;
-    std::string bitBuffer = "";
+    std::string pulseBuffer = "";
     // Process all samples and push detected bits to dataClean vector
     for(long a = 0; a < data.size(); ++a) {
       if(state == SLEEP) {
@@ -464,16 +464,14 @@ int main(int argc, char *argv[])
 	long pulseLength = getPulseLength(data, a, direction);
 	if(pulseLength <= shortPulse + flutter &&
 	   pulseLength >= shortPulse - flutter) {
-	  bitBuffer.append("s");
+	  pulseBuffer.append("s");
+	  pushShort(dataClean, pulseLengthOptimal, direction);
 	} else {
-	  if(bitBuffer.size() >= 64) {
+	  if(pulseBuffer.size() >= 64) {
 #ifdef DEBUG
-	    printf("Accepting wait signal with a length of %ld!\n", bitBuffer.size());
+	    printf("Accepting wait signal with a length of %ld small pulses!\n", pulseBuffer.size());
 #endif
-	    // FIXME: This is broken! I need to insert the init signal from the actual pulse after the waiting pulse is done I think
-	    pushInit(dataClean, pulseLengthOptimal);
-	    pushZero(dataClean, pulseLengthOptimal, bitBuffer.size() / 2);
-	    pushInit(dataClean, pulseLengthOptimal);
+	    a = a - pulseLength + 1;
 	    state = DATA;
 	  } else {
 	    while(pulseLength--) {
@@ -481,9 +479,10 @@ int main(int argc, char *argv[])
 	    }
 	    state = SLEEP;
 	  }
-	  bitBuffer = "";
+	  pulseBuffer = "";
 	}
-      } else if(state == DATA) {
+      }
+      if(state == DATA) {
 	direction = getDirection(data.at(a));
 	long pulseLength = getPulseLength(data, a, direction);
 	if(pulseLength <= shortPulse + flutter) {
@@ -496,7 +495,7 @@ int main(int argc, char *argv[])
 #ifdef DEBUG
 	  printf("Data ended or malformed bit at %ld, pushing stopsignal and resetting\n", a);
 #endif
-	  pushStop(dataClean, pulseLengthOptimal);
+	  pushLong(dataClean, pulseLengthOptimal, direction);
 	  state = SLEEP;
 	}
       }
@@ -615,7 +614,7 @@ OLD Processig code
     printf("Cleaning and optimizing");
     short state = SLEEP;
     short direction = NONE;
-    std::string bitBuffer = "";
+    std::string pulseBuffer = "";
     for(long a = 0; a < data.size(); ++a) {
       if(state == SLEEP) {
 	if(abs(data.at(a)) > initThres) {
@@ -662,14 +661,14 @@ OLD Processig code
 	long pulseLength = a - b + 1;
 	if(pulseLength <= shortPulse + flutter &&
 	   pulseLength >= shortPulse - flutter) {
-	  bitBuffer.append("s");
+	  pulseBuffer.append("s");
 	} else {
-	  if(bitBuffer.size() >= 64) {
+	  if(pulseBuffer.size() >= 64) {
 #ifdef DEBUG
-	    printf("Accepting wait signal with a length of %ld!\n", bitBuffer.size());
+	    printf("Accepting wait signal with a length of %ld!\n", pulseBuffer.size());
 #endif
 	    pushInit(dataClean);
-	    pushZero(dataClean, bitBuffer.size() / 2);
+	    pushZero(dataClean, pulseBuffer.size() / 2);
 	    pushInit(dataClean);
 	    state = DATA;
 	  } else {
@@ -678,7 +677,7 @@ OLD Processig code
 	    }
 	    state = SLEEP;
 	  }
-	  bitBuffer = "";
+	  pulseBuffer = "";
 	}
       } else if(state == DATA) {
 	long b = a;
@@ -695,33 +694,33 @@ OLD Processig code
 	}
 	long pulseLength = a - b + 1;
 	if(pulseLength <= shortPulse + flutter) {
-	  bitBuffer.append("s");
+	  pulseBuffer.append("s");
 	} else if(pulseLength <= mediumPulse + flutter) {
-	  bitBuffer.append("m");
+	  pulseBuffer.append("m");
 	} else if(pulseLength <= longPulse + flutter) {
 	  state = WAIT;
-	  bitBuffer.append("l");
+	  pulseBuffer.append("l");
 	} else {
 #ifdef DEBUG
 	  printf("Data ended or malformed bit at %ld, pushing stopsignal and resetting\n", a);
 #endif
 	  pushStop(dataClean);
-	  bitBuffer = "";
+	  pulseBuffer = "";
 	  state = SLEEP;
 	}
-	if(bitBuffer.size() == 2) {
-	  if(bitBuffer == "ss") {
+	if(pulseBuffer.size() == 2) {
+	  if(pulseBuffer == "ss") {
 	    pushZero(dataClean);
-	  } else if(bitBuffer == "mm") {
+	  } else if(pulseBuffer == "mm") {
 	    pushOne(dataClean);
-	  } else if(bitBuffer == "ms") {
+	  } else if(pulseBuffer == "ms") {
 	    pushOne(dataClean);
-	  } else if(bitBuffer == "sm") {
+	  } else if(pulseBuffer == "sm") {
 	    pushOne(dataClean);
 	  } else {
-	    printf("Malformed bit %s ending at %ld\n", bitBuffer.c_str(), a);
+	    printf("Malformed bit %s ending at %ld\n", pulseBuffer.c_str(), a);
 	  }
-	  bitBuffer = "";
+	  pulseBuffer = "";
 	}
       }
       showProgress(a, dotMod);
