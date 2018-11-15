@@ -470,6 +470,7 @@ int main(int argc, char *argv[])
 #ifdef DEBUG
 	    printf("Accepting wait signal with a length of %ld!\n", bitBuffer.size());
 #endif
+	    // FIXME: This is broken! I need to insert the init signal from the actual pulse after the waiting pulse is done I think
 	    pushInit(dataClean, pulseLengthOptimal);
 	    pushZero(dataClean, pulseLengthOptimal, bitBuffer.size() / 2);
 	    pushInit(dataClean, pulseLengthOptimal);
