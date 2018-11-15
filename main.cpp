@@ -457,7 +457,7 @@ int main(int argc, char *argv[])
 	while(b++ <= a) {
 	  dataClean.push_back(0);
 	}
-	state = DATA;
+	state = WAIT;
       }
       if(state == WAIT) {
 	direction = getDirection(data.at(a));
