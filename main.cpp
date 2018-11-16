@@ -28,7 +28,6 @@
 #include <climits>
 #include <math.h>
 #include <algorithm>
-#include <map>
 #include <numeric>
 
 #include <sndfile.hh>
