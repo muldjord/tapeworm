@@ -56,20 +56,20 @@ void showProgress(const long dots, const long modulus)
 short getDirection(const short &currentValue)
 {
   if(currentValue >= 0) {
-    return RISE;
+    return PH_RISE;
   } else {
-    return FALL;
+    return PH_FALL;
   }
 }
 
 long getPulseLength(const std::vector<short> &data, long &idx, const short &direction)
 {
   long startIdx = idx;
-  if(direction == RISE) {
+  if(direction == PH_RISE) {
     while(idx < startIdx + 50 && idx < data.size() && data.at(idx) >= 0) {
       idx++;
     }
-  } else if(direction == FALL) {
+  } else if(direction == PH_FALL) {
     while(idx < startIdx + 50 && idx < data.size() && data.at(idx) < 0) {
       idx++;
     }
@@ -100,12 +100,12 @@ void pushShort(std::vector<short> &data,
 	      const unsigned short &pulseLengthOptimal,
 	      const short direction)
 {
-  if(direction == RISE) {
+  if(direction == PH_RISE) {
     int b = ceil(pulseLengthOptimal / 2.0);
     while(b--) {
       data.push_back(SHRT_MAX);
     }
-  } else if(direction == FALL) {
+  } else if(direction == PH_FALL) {
     int b = floor(pulseLengthOptimal / 2.0);
     while(b--) {
       data.push_back(SHRT_MIN);
@@ -117,12 +117,12 @@ void pushMedium(std::vector<short> &data,
 		const unsigned short &pulseLengthOptimal,
 		const short direction)
 {
-  if(direction == RISE) {
+  if(direction == PH_RISE) {
     int b = floor(pulseLengthOptimal);
     while(b--) {
       data.push_back(SHRT_MAX);
     }
-  } else if(direction == FALL) {
+  } else if(direction == PH_FALL) {
     int b = ceil(pulseLengthOptimal);
     while(b--) {
       data.push_back(SHRT_MIN);
@@ -134,12 +134,12 @@ void pushLong(std::vector<short> &data,
 	      const unsigned short &pulseLengthOptimal,
 	      const short direction)
 {
-  if(direction == RISE) {
+  if(direction == PH_RISE) {
     int b = ceil(pulseLengthOptimal + pulseLengthOptimal / 2.0);
     while(b--) {
       data.push_back(SHRT_MAX);
     }
-  } else if(direction == FALL) {
+  } else if(direction == PH_FALL) {
     int b = floor(pulseLengthOptimal + pulseLengthOptimal / 2.0);
     while(b--) {
       data.push_back(SHRT_MIN);
@@ -409,25 +409,25 @@ int main(int argc, char *argv[])
     long dotMod = data.size() / 10;
     printf("  Zero bit length = %f (%d baud)\n", bitLength, (int)(srcFile.samplerate() / bitLength));
     printf("Cleaning and optimizing");
-    short state = SLEEP;
-    short direction = NONE;
+    short state = ST_SLEEP;
+    short direction = PH_NONE;
     std::string pulseBuffer = "";
     // Process all samples and push detected bits to dataClean vector
     for(long a = 0; a < data.size(); ++a) {
-      if(state == SLEEP) {
+      if(state == ST_SLEEP) {
 	if(abs(data.at(a)) > initThres) {
-	  state = TRIG;
+	  state = ST_TRIG;
 	}
 	dataClean.push_back(0);
       }
-      if(state == TRIG) {
+      if(state == ST_TRIG) {
 	long b = a;
 	// Seek to next zero crossing
-	if(direction == RISE) {
+	if(direction == PH_RISE) {
 	  while(a < data.size() && data.at(a) >= 0) {
 	    a++;
 	  }
-	} else if(direction == FALL) {
+	} else if(direction == PH_FALL) {
 	  while(a < data.size() && data.at(a) < 0) {
 	    a++;
 	  }
@@ -435,9 +435,9 @@ int main(int argc, char *argv[])
 	while(b++ <= a) {
 	  dataClean.push_back(0);
 	}
-	state = WAIT;
+	state = ST_WAIT;
       }
-      if(state == WAIT) {
+      if(state == ST_WAIT) {
 	direction = getDirection(data.at(a));
 	long pulseLength = getPulseLength(data, a, direction);
 	if(pulseLength <= shortPulse + flutter &&
@@ -450,17 +450,17 @@ int main(int argc, char *argv[])
 	    printf("Accepting wait signal with a length of %ld small pulses!\n", pulseBuffer.size());
 #endif
 	    a = a - pulseLength + 1;
-	    state = DATA;
+	    state = ST_DATA;
 	  } else {
 	    while(pulseLength--) {
 	      dataClean.push_back(0);
 	    }
-	    state = SLEEP;
+	    state = ST_SLEEP;
 	  }
 	  pulseBuffer = "";
 	}
       }
-      if(state == DATA) {
+      if(state == ST_DATA) {
 	direction = getDirection(data.at(a));
 	long pulseLength = getPulseLength(data, a, direction);
 	if(pulseLength <= shortPulse + flutter) {
@@ -474,7 +474,7 @@ int main(int argc, char *argv[])
 	  printf("Data ended or malformed bit at %ld, pushing stopsignal and resetting\n", a);
 #endif
 	  pushLong(dataClean, pulseLengthOptimal, direction);
-	  state = SLEEP;
+	  state = ST_SLEEP;
 	}
       }
       showProgress(a, dotMod);
