@@ -34,14 +34,14 @@
 
 #define BUFFER 1024
 
-#define SLEEP 42
-#define TRIG 43
-#define WAIT 44
-#define DATA 45
+#define ST_SLEEP 42
+#define ST_TRIG 43
+#define ST_WAIT 44
+#define ST_DATA 45
 
-#define RISE 666
-#define FALL 667
-#define NONE 668
+#define PH_RISE 666
+#define PH_FALL 667
+#define PH_NONE 668
 
 //#define DEBUG
 
