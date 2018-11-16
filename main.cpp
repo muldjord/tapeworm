@@ -34,8 +34,6 @@
 
 #define BUFFER 1024
 
-#define ZEROSPAN 100
-
 #define SLEEP 42
 #define TRIG 43
 #define WAIT 44
@@ -342,26 +340,7 @@ int main(int argc, char *argv[])
   }
 #endif
 
-  // Set maximum and minimum sample value
-  /*
-  int maxVal = 0;
-  int minVal = 0;
-  for(int a = 0; a < data.size(); ++a) {
-    int sample = data.at(a);
-    if(sample > maxVal)
-      maxVal = sample;
-    if(sample < minVal)
-      minVal = sample;
-  }
-
-  printf("maxVal=%d\n", maxVal);
-  printf("minVal=%d\n", minVal);
-  */
   int initThres = stdDevFromAbs(data, 0, data.size());
-  /*
-  int zeroThres = (meanFromAbs(data, 0, ZEROSPAN, initThres / 2) +
-		   meanFromAbs(data, data.size() - ZEROSPAN, ZEROSPAN, initThres / 2));
-  */
 #ifdef DEBUG
   printf("Calculated values:\n");
   printf("  Signal trigger=%d\n", initThres);
