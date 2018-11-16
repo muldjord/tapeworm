@@ -22,6 +22,9 @@ $ make
 ```
 This will give you the executable "tapeworm", ready for use.
 
+### Windows
+Should work with just about any C++ compiler such as mingw, just keep in mind that it needs libsndfile, so you need to get the header file and dll or library file - however that stuff works under Windows (I don't know, so please don't ask :) ).
+
 ## Usage
 ```
 $ ./tapeworm INFILE [OUTFILE]
