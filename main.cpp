@@ -34,7 +34,7 @@
 #define BUFFER 1024
 
 #define ST_SLEEP 42
-#define ST_TRIG 43
+#define ST_TRIGGER 43
 #define ST_WAIT 44
 #define ST_DATA 45
 
@@ -50,6 +50,51 @@ void showProgress(const long dots, const long modulus)
     printf(".");
     fflush(stdout);
   }
+}
+
+double getBitlength(const std::vector<short> &data,
+		    const short noSignalMax,
+		    const int &initThres)
+{
+  printf("Analyzing");
+  double bitLength = 0.0;
+  short neededBits = 256;
+  short dotMod = neededBits / 10;
+  std::vector<short> bitLengths;
+  long noSignal = 0;
+  for(long a = 0; a < data.size(); ++a) {
+    // Detect signal begin
+    if(data.at(a) > initThres) {
+      short curLength = 0;
+      while(data.at(a + curLength) >= 0 &&
+	    a + curLength < data.size()) {
+	curLength++;
+      }
+      while(data.at(a + curLength) < initThres &&
+	    a + curLength < data.size()) {
+	curLength++;
+      }
+      bitLengths.push_back(curLength);
+      if(bitLengths.size() == neededBits) {
+	break;
+      }
+      a += curLength - 1;
+      showProgress(bitLengths.size(), dotMod);
+    } else {
+      noSignal++;
+    }
+    if(bitLengths.size() && noSignal >= noSignalMax) {
+      bitLengths.clear();
+      noSignal = 0;
+    }
+  }
+  for(int a = bitLengths.size() / 2; a < bitLengths.size(); ++a) {
+    bitLength += bitLengths.at(a);
+  }
+  bitLength /= bitLengths.size() / 2;
+  printf(" Done!\n");
+
+  return bitLength;
 }
 
 short getDirection(const short &currentValue)
@@ -344,51 +389,9 @@ int main(int argc, char *argv[])
   printf("Calculated values:\n");
   printf("  Signal trigger=%d\n", initThres);
 #endif
-  //printf("  Zero level=%d\n", zeroThres);
   
-  typedef std::pair<short, long> pair;
-  std::vector<pair> segSizes;
-  double bitLength = 0.0;
-  // Analyze
-  {
-    printf("Analyzing");
-    short neededBits = 512;
-    short dotMod = neededBits / 10;
-    std::vector<short> bitLengths;
-    long noSignal = 0;
-    short noSignalMax = srcFile.samplerate() / 1102; // About 20 for 22050 Hz
-    for(long a = 0; a < data.size(); ++a) {
-      // Detect signal begin
-      if(data.at(a) > initThres) {
-	short curLength = 0;
-	while(data.at(a + curLength) >= 0 &&
-	      a + curLength < data.size()) {
-	  curLength++;
-	}
-	while(data.at(a + curLength) <= initThres &&
-	      a + curLength < data.size()) {
-	  curLength++;
-	}
-	bitLengths.push_back(curLength);
-	if(bitLengths.size() == neededBits) {
-	  break;
-	}
-	a += curLength - 1;
-	showProgress(bitLengths.size(), dotMod);
-      } else {
-	noSignal++;
-      }
-      if(bitLengths.size() && noSignal >= noSignalMax) {
-	bitLengths.clear();
-	noSignal = 0;
-      }
-    }
-    for(int a = bitLengths.size() / 2; a < bitLengths.size(); ++a) {
-      bitLength += bitLengths.at(a);
-    }
-    bitLength /= bitLengths.size() / 2;
-    printf(" Done!\n");
-  }
+  // Analyze to get optimal bitlength (2 short pulses)
+  double bitLength = getBitlength(data, srcFile.samplerate() / 1102, initThres);
   
   std::vector<short> dataClean;
   // Clean and optimize
@@ -411,15 +414,17 @@ int main(int argc, char *argv[])
     short state = ST_SLEEP;
     short direction = PH_NONE;
     std::string pulseBuffer = "";
+    std::string bitBuffer = "";
+    bool onlyShorts = true;
     // Process all samples and push detected bits to dataClean vector
     for(long a = 0; a < data.size(); ++a) {
       if(state == ST_SLEEP) {
 	if(abs(data.at(a)) > initThres) {
-	  state = ST_TRIG;
+	  state = ST_TRIGGER;
 	}
 	dataClean.push_back(0);
       }
-      if(state == ST_TRIG) {
+      if(state == ST_TRIGGER) {
 	long b = a;
 	// Seek to next zero crossing
 	if(direction == PH_RISE) {
@@ -448,7 +453,7 @@ int main(int argc, char *argv[])
 #ifdef DEBUG
 	    printf("Accepting wait signal with a length of %ld small pulses!\n", pulseBuffer.size());
 #endif
-	    a = a - pulseLength + 1;
+	    a = a - pulseLength;
 	    state = ST_DATA;
 	  } else {
 	    while(pulseLength--) {
@@ -458,22 +463,56 @@ int main(int argc, char *argv[])
 	  }
 	  pulseBuffer = "";
 	}
-      }
-      if(state == ST_DATA) {
+      } else if(state == ST_DATA) {
 	direction = getDirection(data.at(a));
 	long pulseLength = getPulseLength(data, a, direction);
 	if(pulseLength <= shortPulse + flutter) {
 	  pushShort(dataClean, pulseLengthOptimal, direction);
+	  pulseBuffer.append("s");
 	} else if(pulseLength <= mediumPulse + flutter) {
 	  pushMedium(dataClean, pulseLengthOptimal, direction);
+	  pulseBuffer.append("m");
 	} else if(pulseLength <= longPulse + flutter) {
 	  pushLong(dataClean, pulseLengthOptimal, direction);
+	  pulseBuffer.append("l");
 	} else {
 #ifdef DEBUG
 	  printf("Data ended or malformed bit at %ld, pushing stopsignal and resetting\n", a);
+	  printf("Constructed bits for this segment:\n%s\n", bitBuffer.c_str());
 #endif
 	  pushLong(dataClean, pulseLengthOptimal, direction);
 	  state = ST_SLEEP;
+	  pulseBuffer = "";
+	  bitBuffer = "";
+	}
+	if(pulseBuffer.size() == 2) {
+	  if(pulseBuffer == "ss") {
+	    bitBuffer.append("0");
+	  } else if(pulseBuffer == "sm") {
+	    bitBuffer.append("0");
+	  } else if(pulseBuffer == "ms") {
+	    bitBuffer.append("0");
+	  } else if(pulseBuffer == "mm") {
+	    bitBuffer.append("1");
+	  } else {
+#ifdef DEBUG
+	    printf("Detected bad bit '%s' ending at %ld\n", pulseBuffer.c_str(), a);
+#endif
+	  }
+	  pulseBuffer = "";
+	}
+	if(pulseBuffer.size() == 1 && pulseBuffer != "s") {
+	  onlyShorts = false;
+	}
+	if(bitBuffer.size() >= 64 && onlyShorts) {
+#ifdef DEBUG
+	  printf("Where back in a waiting signal, resetting to ST_WAIT\n");
+	  printf("Constructed bits for this segment:\n%s\n", bitBuffer.c_str());
+#endif
+	  state = ST_WAIT;
+	  onlyShorts = true;
+	  pulseBuffer = "";
+	  bitBuffer = "";
 	}
       }
       showProgress(a, dotMod);
